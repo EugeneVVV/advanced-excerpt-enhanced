@@ -216,6 +216,15 @@ class Advanced_Excerpt {
 
 		$this->options = wp_parse_args( $this->options, $this->default_options );
 
+		// Check if we need to upgrade from an older version
+		// This ensures new options from fork versions are added to existing installations
+		$saved_version = get_option( 'advanced_excerpt_version' );
+		if ( $saved_version !== $GLOBALS['advanced_excerpt_version'] ) {
+			// Version changed - save merged options to include any new defaults
+			$update_options = true;
+			update_option( 'advanced_excerpt_version', $GLOBALS['advanced_excerpt_version'] );
+		}
+
 		if ( $update_options ) {
 			update_option( 'advanced_excerpt', $this->options );
 		}

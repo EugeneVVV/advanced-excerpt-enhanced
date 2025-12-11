@@ -38,13 +38,27 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Nested lists count as one structure
 - All structures properly closed when limit reached
 
-### 7. **Line Break Cleanup**
+### 7. **List/Table Ellipsis**
+- Separate ellipsis marker for truncated lists and tables
+- For lists: displayed as a list item without bullet
+- For tables: displayed as plain text below the table
+- Customizable or can be disabled (leave empty)
+- Works with item/row limits
+
+### 8. **Block Finish Mode**
+- Stop excerpt at next block-level element after length reached
+- Supports 37 block-level tags: `p`, `div`, `blockquote`, `li`, `td`, `th`, `h1-h6`, `article`, `section`, `header`, `footer`, `aside`, `nav`, `ul`, `ol`, `table`, `tr`, `pre`, `form`, `fieldset`, `dl`, `dt`, `dd`, `hr`, `figure`, `figcaption`, `main`, `address`, `details`, `summary`, `dialog`
+- Also stops at `<br>` tags
+- Default finish mode for new installations
+- Creates natural-looking excerpt boundaries
+
+### 9. **Line Break Cleanup**
 - Removes multiple consecutive `<br>` tags
 - Eliminates `<br>` between block elements
 - Clean, professional formatting
 - No awkward spacing issues
 
-### 8. **Excerpt Cut Markers**
+### 10. **Excerpt Cut Markers**
 - Mark sections of content to exclude from excerpts
 - Use `[excerpt_cut]...[/excerpt_cut]` shortcodes
 - Support for multiple cut sections per post
@@ -62,6 +76,8 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 | Line Breaks | ❌ Multiple/messy | ✅ Clean & minimal |
 | Homepage Filtering | ❌ None | ✅ Multi-category support |
 | Content Exclusion | ❌ None | ✅ Shortcode markers |
+| Finish Modes | ❌ Exact/Word/Sentence | ✅ + Block mode (37 tags) |
+| List/Table Ellipsis | ❌ Generic only | ✅ Separate customizable |
 
 ## 🚀 Installation
 
@@ -74,8 +90,11 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 
 ### Basic Settings
 - **Excerpt Length**: Words or characters
-- **Ellipsis**: Custom text for truncation
-- **Finish**: Exact, Word, or Sentence completion
+- **Text Ellipsis**: Custom text for truncation (e.g., `&hellip;`)
+- **List/Table Ellipsis**: Separate ellipsis for truncated lists/tables
+- **Finish**: Exact, Word, Sentence, or **Block** (default) completion
+  - **Block mode**: Stops at next block-level tag or `<br>` after length reached
+  - Supports 37 block-level tags including HTML5 elements
 - **Read More Link**: Customizable link text
 
 ### New Advanced Settings
@@ -179,6 +198,7 @@ add_filter('advanced_excerpt_read_more_text', function($text) {
 **Settings Updates:**
 - ✅ Changed default "Finish" mode to "Block" (stops at next block-level tag or BR)
 - ✅ Renamed "Ellipsis:" to "Text Ellipsis:" for clarity
+- ✅ Expanded Block mode to support 37 block-level tags (added 8 HTML5 elements: `hr`, `figure`, `figcaption`, `main`, `address`, `details`, `summary`, `dialog`)
 
 ### Version 4.4.1-fork.1 - Enhanced Edition
 

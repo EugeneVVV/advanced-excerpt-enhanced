@@ -28,7 +28,7 @@
 					<tr valign="top">
 						<th scope="row">
 							<label for="ellipsis">
-							<?php _e( "Ellipsis:", 'advanced-excerpt' ); ?>
+							<?php _e( "Text Ellipsis:", 'advanced-excerpt' ); ?>
 							</label>
 						</th>
 						<td>
@@ -37,6 +37,20 @@
 								<?php printf( __( '(use <a href="%s" target="_blank">HTML entities</a>)', 'advanced-excerpt' ), 'http://entitycode.com' ); ?>
 							</p>
 							<p class="description"><?php _e( "Will substitute the part of the post that is omitted in the excerpt.", 'advanced-excerpt' ); ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row">
+							<label for="list-ellipsis">
+							<?php _e( "List/Table Ellipsis:", 'advanced-excerpt' ); ?>
+							</label>
+						</th>
+						<td>
+							<p>
+								<input name="list_ellipsis" type="text" id="list-ellipsis" value="<?php echo isset( $list_ellipsis ) ? htmlentities( $list_ellipsis ) : ''; ?>" size="20" />
+								<?php printf( __( '(use <a href="%s" target="_blank">HTML entities</a>)', 'advanced-excerpt' ), 'http://entitycode.com' ); ?>
+							</p>
+							<p class="description"><?php _e( "Displayed when a list or table is truncated due to item/row limits. For lists: shows as a list item without a bullet point. For tables: shows as plain text below the table. Leave empty to disable.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
 					<tr valign="top">
@@ -59,10 +73,14 @@
 								<label for="finish-sentence">
 								<input type="radio" id="finish-sentence" name="finish" value="sentence"<?php echo ( 'sentence' == $finish ) ? ' checked="checked"' : ''; ?> />
 								<?php _e( "Sentence", 'advanced-excerpt' ); ?>
+								</label><br />
+								<label for="finish-block">
+								<input type="radio" id="finish-block" name="finish" value="block"<?php echo ( 'block' == $finish ) ? ' checked="checked"' : ''; ?> />
+								<?php _e( "Block", 'advanced-excerpt' ); ?>
 								</label>
 							</p>
 
-							<p class="description"><?php _e( "Prevents cutting a word or sentence at the end of an excerpt. This option can result in (slightly) longer excerpts.", 'advanced-excerpt' ); ?></p>
+							<p class="description"><?php _e( "Prevents cutting a word, sentence, or block element at the end of an excerpt. Block mode stops at the next &lt;br&gt; or closing block tag (&lt;/p&gt;, &lt;/div&gt;, etc.). This option can result in (slightly) longer excerpts.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
 					<tr valign="top">
@@ -76,18 +94,29 @@
 							<input name="skip_headers" type="checkbox" id="skip-headers" value="on" <?php echo ( 1 == $skip_headers ) ? 'checked="checked"' : ''; ?> />
 							<?php _e( "Skip header text (H1-H6) in excerpts", 'advanced-excerpt' ); ?>
 							</label>
-							<p class="description"><?php _e( "When enabled, text inside header tags (H1, H2, H3, etc.) will not be included in the excerpt content. The header formatting is removed, and the header text is completely skipped.", 'advanced-excerpt' ); ?></p>
+							<p class="description"><?php _e( "When enabled, text inside header tags (H1, H2, H3, etc.) will not be included in the excerpt content. The header formatting is removed, and the header text is completely skipped. <strong>Note:</strong> Header tags (H1-H6) must be allowed in the \"Strip Tags\" section below for this option to work (either \"Don't remove any tags\" or check H1-H6 in \"Remove all tags except the following\").", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
 					<tr valign="top">
 						<th scope="row">
 							<label for="max-list-items">
-							<?php _e( "Max List Items:", 'advanced-excerpt' ); ?>
+							<?php _e( "Max List Items (Total):", 'advanced-excerpt' ); ?>
 							</label>
 						</th>
 						<td>
 							<input name="max_list_items" type="number" id="max-list-items" value="<?php echo $max_list_items; ?>" min="0" size="3" />
-							<p class="description"><?php _e( "Maximum number of list items (LI) to include across all lists in the excerpt. Set to 0 for unlimited. Lists are properly closed even when cut off mid-list.", 'advanced-excerpt' ); ?></p>
+							<p class="description"><?php _e( "Maximum total number of list items (LI) to include across all nesting levels. Set to 0 for unlimited. This counts ALL items including nested sub-items.", 'advanced-excerpt' ); ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row">
+							<label for="max-top-level-list-items">
+							<?php _e( "Max Top-Level List Items/Table Rows:", 'advanced-excerpt' ); ?>
+							</label>
+						</th>
+						<td>
+							<input name="max_top_level_list_items" type="number" id="max-top-level-list-items" value="<?php echo $max_top_level_list_items; ?>" min="0" size="3" />
+							<p class="description"><?php _e( "Maximum number of top-level list items (excludes nested sub-items) and table rows. Set to 0 for unlimited. Use this to limit list/table size without counting nested items.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
 					<tr valign="top">

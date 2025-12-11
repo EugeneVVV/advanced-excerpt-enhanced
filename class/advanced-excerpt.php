@@ -22,8 +22,9 @@ class Advanced_Excerpt {
 		'no_custom_from_custom' => 0,
 		'link_excerpt' => 0,
 		'no_shortcode' => 1,
-		'finish' => 'exact',
+		'finish' => 'block',
 		'ellipsis' => '&hellip;',
+		'list_ellipsis' => '',
 		'read_more' => 'Read the rest',
 		'add_link' => 0,
 		'link_new_tab' => 0,
@@ -39,6 +40,7 @@ class Advanced_Excerpt {
 		'homepage_categories' => array(),
 		'enable_homepage_category_filter' => 0,
 		'max_list_items' => 0,
+		'max_top_level_list_items' => 0,
 		'max_top_level_structures' => 0,
 		'skip_headers' => 0,
 	);
@@ -89,6 +91,9 @@ class Advanced_Excerpt {
 
 		add_action( 'loop_start', array( $this, 'hook_content_filters' ) );
 		add_action( 'pre_get_posts', array( $this, 'filter_homepage_category' ) );
+
+		// Register excerpt cut shortcode (returns empty string so markers don't appear in post display)
+		add_shortcode( 'excerpt_cut', array( $this, 'excerpt_cut_shortcode' ) );
 	}
 
 	function hook_content_filters() {
@@ -289,6 +294,9 @@ class Advanced_Excerpt {
 
 		$text = get_the_content( '' );
 
+		// Remove excerpt cut sections BEFORE any other processing
+		$text = $this->remove_excerpt_cut_sections( $text );
+
 		// generate excerpt from the "custom excerpt" (only if there is a "custom excerpt" )
 		if ( $no_custom && $no_custom_from_custom && ! empty( trim( $post->post_excerpt ) ) ) {
 			$text = $post->post_excerpt;
@@ -363,25 +371,53 @@ class Advanced_Excerpt {
 		$tag_stack = array(); // Track open tags that need closing
 		$list_stack = array(); // Track nested lists (ul/ol)
 		$list_item_count = 0; // Total list items across all lists
+		$top_level_list_item_count = 0; // Top-level list items only (not nested)
 		$top_level_structures = 0; // Count of top-level tables and lists
 		$in_header = false; // Are we inside a header tag?
 		$in_table = false; // Are we inside a table?
 		$table_row_count = 0; // Count rows in current table
+		$looking_for_block_end = false; // For 'block' finish mode
+		$truncated_list_or_table = false; // Track if we truncated due to list/table limits
 
 		$max_list_items = isset( $this->options['max_list_items'] ) ? (int) $this->options['max_list_items'] : 0;
+		$max_top_level_list_items = isset( $this->options['max_top_level_list_items'] ) ? (int) $this->options['max_top_level_list_items'] : 0;
 		$max_structures = isset( $this->options['max_top_level_structures'] ) ? (int) $this->options['max_top_level_structures'] : 0;
 		$skip_headers = isset( $this->options['skip_headers'] ) ? (int) $this->options['skip_headers'] : 0;
+		$list_ellipsis = isset( $this->options['list_ellipsis'] ) ? $this->options['list_ellipsis'] : '';
 
 		// Divide the string into tokens; HTML tags, or words, followed by any whitespace
 		preg_match_all( '/(<[^>]+>|[^<>\s]+)\s*/u', $text, $tokens );
 
 		foreach ( $tokens[0] as $t ) {
 			// Check if we've reached limits
-			if ( $w >= $length && 'sentence' != $finish ) {
+			if ( $w >= $length && 'sentence' != $finish && 'block' != $finish ) {
 				break;
 			}
 
+			// For block finish mode, activate looking for block end when length exceeded
+			if ( $w >= $length && 'block' == $finish && ! $looking_for_block_end ) {
+				$looking_for_block_end = true;
+			}
+
 			if ( $t[0] == '<' ) { // Token is a tag
+				// In block finish mode, check for br or block tags (opening or closing)
+				if ( $looking_for_block_end ) {
+					// Check for <br> tag
+					if ( preg_match( '/<br\s*\/?>/i', $t ) ) {
+						$out .= $t;
+						break;
+					}
+
+					// Check for block-level tags (both opening and closing)
+					$block_tags = array( 'p', 'div', 'blockquote', 'li', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section', 'header', 'footer', 'aside', 'nav', 'ul', 'ol', 'table', 'tr', 'pre', 'form', 'fieldset', 'dl', 'dt', 'dd', 'hr', 'figure', 'figcaption', 'main', 'address', 'details', 'summary', 'dialog' );
+					if ( preg_match( '/<\/?([a-zA-Z0-9]+)/', $t, $tag_match ) ) {
+						$block_tag = strtolower( $tag_match[1] );
+						if ( in_array( $block_tag, $block_tags ) ) {
+							$out .= $t;
+							break;
+						}
+					}
+				}
 				// Parse tag name
 				if ( preg_match( '/<\/?([a-zA-Z0-9]+)/', $t, $tag_match ) ) {
 					$tag_name = strtolower( $tag_match[1] );
@@ -406,6 +442,7 @@ class Advanced_Excerpt {
 						if ( empty( $list_stack ) ) {
 							$top_level_structures++;
 							if ( $max_structures > 0 && $top_level_structures > $max_structures ) {
+								$truncated_list_or_table = true;
 								break; // Exceeded max structures
 							}
 						}
@@ -435,8 +472,21 @@ class Advanced_Excerpt {
 					if ( $tag_name == 'li' ) {
 						if ( ! $is_closing ) {
 							$list_item_count++;
+
+							// Check if this is a top-level list item (list_stack has only 1 element)
+							$is_top_level_item = ( count( $list_stack ) == 1 );
+
+							if ( $is_top_level_item ) {
+								$top_level_list_item_count++;
+								if ( $max_top_level_list_items > 0 && $top_level_list_item_count > $max_top_level_list_items ) {
+									$truncated_list_or_table = true;
+									break; // Exceeded max top-level list items
+								}
+							}
+
 							if ( $max_list_items > 0 && $list_item_count > $max_list_items ) {
-								break; // Exceeded max list items
+								$truncated_list_or_table = true;
+								break; // Exceeded max total list items
 							}
 							array_push( $tag_stack, 'li' );
 						} else {
@@ -458,6 +508,7 @@ class Advanced_Excerpt {
 						$table_row_count = 0;
 						$top_level_structures++;
 						if ( $max_structures > 0 && $top_level_structures > $max_structures ) {
+							$truncated_list_or_table = true;
 							break; // Exceeded max structures
 						}
 						array_push( $tag_stack, 'table' );
@@ -483,6 +534,11 @@ class Advanced_Excerpt {
 					if ( $tag_name == 'tr' ) {
 						if ( ! $is_closing ) {
 							$table_row_count++;
+							// Table rows count toward top-level list items limit
+							if ( $max_top_level_list_items > 0 && $table_row_count > $max_top_level_list_items ) {
+								$truncated_list_or_table = true;
+								break; // Exceeded max rows
+							}
 							array_push( $tag_stack, 'tr' );
 						} else {
 							// Remove last 'tr' from tag stack
@@ -559,6 +615,39 @@ class Advanced_Excerpt {
 				}
 
 				$out .= $t;
+			}
+		}
+
+		// Add list/table ellipsis if truncated and option is set
+		if ( $truncated_list_or_table && ! empty( $list_ellipsis ) ) {
+			// Determine if we're in a list or table by checking the tag stack
+			$in_list_context = false;
+			$in_table_context = false;
+
+			foreach ( $tag_stack as $tag ) {
+				if ( in_array( $tag, array( 'ul', 'ol' ) ) ) {
+					$in_list_context = true;
+					break;
+				}
+				if ( $tag == 'table' ) {
+					$in_table_context = true;
+					break;
+				}
+			}
+
+			if ( $in_list_context ) {
+				// Add as a list item with no bullet point (using CSS class)
+				$out .= '<li class="excerpt-ellipsis" style="list-style-type: none;">' . $list_ellipsis . '</li>';
+			} elseif ( $in_table_context ) {
+				// Close table first, then add as plain text below
+				while ( ! empty( $tag_stack ) ) {
+					$tag = array_pop( $tag_stack );
+					$out .= '</' . $tag . '>';
+				}
+				// Add ellipsis as plain text with line break after the closed table
+				$out .= '<div class="excerpt-ellipsis">' . $list_ellipsis . '</div><br />';
+				// Clear tag stack since we already closed everything
+				$tag_stack = array();
 			}
 		}
 
@@ -658,12 +747,14 @@ class Advanced_Excerpt {
 		$this->options['length_type'] = $_POST['length_type'];
 		$this->options['finish'] = $_POST['finish'];
 		$this->options['ellipsis'] = $_POST['ellipsis'];
+		$this->options['list_ellipsis'] = isset( $_POST['list_ellipsis'] ) ? $_POST['list_ellipsis'] : '';
 		$this->options['read_more'] = isset( $_POST['read_more'] ) ? $_POST['read_more'] : $this->options['read_more'];
 		$this->options['allowed_tags'] = ( isset( $_POST['allowed_tags'] ) ) ? array_unique( (array) $_POST['allowed_tags'] ) : array();
 		$this->options['exclude_pages'] = ( isset( $_POST['exclude_pages'] ) ) ? array_unique( (array) $_POST['exclude_pages'] ) : array();
 		$this->options['allowed_tags_option'] = $_POST['allowed_tags_option'];
 		$this->options['homepage_categories'] = ( isset( $_POST['homepage_categories'] ) ) ? array_map( 'intval', array_unique( (array) $_POST['homepage_categories'] ) ) : array();
 		$this->options['max_list_items'] = isset( $_POST['max_list_items'] ) ? (int) $_POST['max_list_items'] : 0;
+		$this->options['max_top_level_list_items'] = isset( $_POST['max_top_level_list_items'] ) ? (int) $_POST['max_top_level_list_items'] : 0;
 		$this->options['max_top_level_structures'] = isset( $_POST['max_top_level_structures'] ) ? (int) $_POST['max_top_level_structures'] : 0;
 
 		update_option( 'advanced_excerpt', $this->options );
@@ -724,6 +815,107 @@ class Advanced_Excerpt {
 			// WordPress cat parameter supports comma-separated IDs for multiple categories (OR logic)
 			$query->set( 'cat', implode( ',', $this->options['homepage_categories'] ) );
 		}
+	}
+
+	/**
+	 * Shortcode handler for [excerpt_cut] and [/excerpt_cut]
+	 * Returns empty string so markers don't appear in post display
+	 *
+	 * @return string Empty string
+	 */
+	function excerpt_cut_shortcode() {
+		return '';
+	}
+
+	/**
+	 * Remove content marked with [excerpt_cut]...[/excerpt_cut] from text
+	 * Supports multiple pairs and unpaired opening tags (cuts to end)
+	 * Nested [excerpt_cut] markers are ignored (treated as literal text)
+	 * Orphaned [/excerpt_cut] markers without opening tags are ignored
+	 *
+	 * @param string $content Post content
+	 * @return string Content with marked sections removed
+	 */
+	function remove_excerpt_cut_sections( $content ) {
+		// Pattern to find shortcodes: [excerpt_cut] and [/excerpt_cut]
+		$start_pattern = '/\[excerpt_cut\]/i';
+		$end_pattern = '/\[\/excerpt_cut\]/i';
+
+		// Find all start positions
+		preg_match_all( $start_pattern, $content, $start_matches, PREG_OFFSET_CAPTURE );
+		// Find all end positions
+		preg_match_all( $end_pattern, $content, $end_matches, PREG_OFFSET_CAPTURE );
+
+		// If no start markers, just remove any orphaned end markers and return
+		if ( empty( $start_matches[0] ) ) {
+			if ( ! empty( $end_matches[0] ) ) {
+				// Remove orphaned [/excerpt_cut] markers
+				$content = preg_replace( $end_pattern, '', $content );
+			}
+			return $content;
+		}
+
+		$start_positions = array();
+		foreach ( $start_matches[0] as $match ) {
+			$start_positions[] = $match[1]; // offset
+		}
+
+		$end_positions = array();
+		foreach ( $end_matches[0] as $match ) {
+			$end_positions[] = $match[1]; // offset
+		}
+
+		// Build array of regions to cut: [start_offset, end_offset]
+		// Properly pair markers, ignoring nested starts and orphaned ends
+		$cut_regions = array();
+		$start_index = 0;
+		$end_index = 0;
+
+		while ( $start_index < count( $start_positions ) ) {
+			$start_pos = $start_positions[ $start_index ];
+
+			// Find the next end marker after this start
+			$found_end = false;
+			while ( $end_index < count( $end_positions ) ) {
+				if ( $end_positions[$end_index] > $start_pos ) {
+					// Found matching end
+					$end_pos = $end_positions[$end_index] + strlen( '[/excerpt_cut]' );
+					$cut_regions[] = array( $start_pos, $end_pos );
+
+					// Skip any start markers that fall within this cut region (nested markers)
+					// They should be ignored since they're inside a cut section
+					$start_index++;
+					while ( $start_index < count( $start_positions ) && $start_positions[$start_index] < $end_pos ) {
+						$start_index++; // Skip nested start markers
+					}
+
+					$end_index++; // Move past this end marker
+					$found_end = true;
+					break;
+				}
+				$end_index++; // Skip orphaned end markers that come before current start
+			}
+
+			if ( ! $found_end ) {
+				// No closing tag - cut to end of content
+				$cut_regions[] = array( $start_pos, strlen( $content ) );
+				break; // No more processing needed - everything after this is cut
+			}
+		}
+
+		// Remove regions in reverse order to preserve offsets
+		$cut_regions = array_reverse( $cut_regions );
+
+		foreach ( $cut_regions as $region ) {
+			list( $start, $end ) = $region;
+			$content = substr_replace( $content, '', $start, $end - $start );
+		}
+
+		// Remove any remaining orphaned [/excerpt_cut] markers that weren't paired
+		// (These would be end markers that appeared before any start markers)
+		$content = preg_replace( $end_pattern, '', $content );
+
+		return $content;
 	}
 
 }

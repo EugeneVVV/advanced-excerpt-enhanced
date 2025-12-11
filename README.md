@@ -44,6 +44,13 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Clean, professional formatting
 - No awkward spacing issues
 
+### 8. **Excerpt Cut Markers**
+- Mark sections of content to exclude from excerpts
+- Use `[excerpt_cut]...[/excerpt_cut]` shortcodes
+- Support for multiple cut sections per post
+- Unpaired markers cut to end of post
+- Markers invisible in rendered posts
+
 ## 📊 Key Improvements
 
 | Feature | Before | After |
@@ -54,6 +61,7 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 | Table Support | ❌ Breaks mid-row | ✅ Clean row completion |
 | Line Breaks | ❌ Multiple/messy | ✅ Clean & minimal |
 | Homepage Filtering | ❌ None | ✅ Multi-category support |
+| Content Exclusion | ❌ None | ✅ Shortcode markers |
 
 ## 🚀 Installation
 
@@ -72,7 +80,8 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 
 ### New Advanced Settings
 - **Skip Headers**: Remove H1-H6 content from excerpts
-- **Max List Items**: Limit total list items (0 = unlimited)
+- **Max List Items (Total)**: Limit total list items across all nesting levels (0 = unlimited)
+- **Max Top-Level List Items**: Limit only top-level list items, excludes nested items (0 = unlimited)
 - **Max Top-Level Structures**: Limit tables/lists (0 = unlimited)
 - **Homepage Category Filter**: Multi-select category filtering
 
@@ -100,6 +109,41 @@ the_advanced_excerpt('length=50&length_type=words&skip_headers=1&max_list_items=
 3. Select desired categories
 4. Ensure Settings → Reading is set to "Your latest posts"
 
+### Excerpt Cut Markers
+Exclude specific sections from excerpts while keeping them in full posts:
+
+```html
+<p>This appears in excerpt.</p>
+
+[excerpt_cut]
+<h2>This heading is hidden from excerpts</h2>
+<p>This content won't appear in excerpts.</p>
+<ul>
+  <li>Hidden list item 1</li>
+  <li>Hidden list item 2</li>
+</ul>
+[/excerpt_cut]
+
+<p>This also appears in excerpt.</p>
+
+[excerpt_cut]
+<p>Another hidden section.</p>
+[/excerpt_cut]
+
+<p>Final visible paragraph.</p>
+```
+
+**Features:**
+- Multiple cut sections supported
+- Unpaired `[excerpt_cut]` cuts everything to end of post
+- Markers are invisible in rendered posts (no visual impact)
+- Works with all other excerpt features (lists, tables, headers, etc.)
+
+**Important Notes:**
+- Nested `[excerpt_cut]` markers are ignored (treated as literal text within the cut section)
+- Orphaned `[/excerpt_cut]` markers without opening tags are ignored
+- This ensures predictable behavior and prevents malformed markup
+
 ## 🔧 Developer Filters
 
 ```php
@@ -121,7 +165,22 @@ add_filter('advanced_excerpt_read_more_text', function($text) {
 
 ## 📝 Changelog
 
-### Version 4.4.1 - Enhanced Edition
+### Version 4.4.2-fork
+
+**New Features:**
+- ✅ Excerpt cut markers (`[excerpt_cut]` shortcodes)
+  - Mark sections to exclude from excerpts
+  - Support for multiple cut sections
+  - Unpaired markers cut to end of post
+  - No visual impact on rendered posts
+  - Nested markers properly ignored
+  - Orphaned closing tags removed cleanly
+
+**Settings Updates:**
+- ✅ Changed default "Finish" mode to "Block" (stops at next block-level tag or BR)
+- ✅ Renamed "Ellipsis:" to "Text Ellipsis:" for clarity
+
+### Version 4.4.1-fork.1 - Enhanced Edition
 
 **New Features:**
 - ✅ Homepage category filter (multi-select)
@@ -168,7 +227,7 @@ GPLv3 - Same as the original Advanced Excerpt plugin
 ## 👏 Credits
 
 - **Original Plugin**: Advanced Excerpt by WPKube & basvd
-- **Enhancements**: Homepage filtering, smart tag closing, list/table handling, line break cleanup
+- **Enhancements**: Homepage filtering, smart tag closing, list/table handling, line break cleanup, excerpt cut markers
 
 ## 🐛 Known Issues
 

@@ -110,6 +110,11 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - **Max List Items (Total)**: Limit total list items across all nesting levels (0 = unlimited)
 - **Max Top-Level List Items**: Limit only top-level list items, excludes nested items (0 = unlimited)
 - **Max Top-Level Structures**: Limit tables/lists (0 = unlimited)
+- **RSS Max Length (chars)**: Maximum character limit for RSS feeds
+  - **Recommended for Slack**: 4000 characters
+  - **Slack absolute max**: 40000 characters (truncated after)
+  - Ensures valid HTML even after truncation
+  - Set to 0 for no limit
 - **Homepage Category Filter**: Multi-select category filtering
 
 ## 💡 Usage Examples
@@ -214,6 +219,11 @@ Control what appears in excerpts vs full posts:
 **RSS Feed Improvements:**
 - Removes ALL `<br>` tags in RSS feeds (not just duplicates)
 - Cleans up broken/partial HTML tags at excerpt end
+- **RSS Max Length setting** enforces character limits (recommended: 4000 for Slack)
+  - Slack recommended limit: 4000 characters for optimal display
+  - Slack absolute max: 40000 characters (messages truncated after)
+  - Intelligently truncates at safe points (after closing tags)
+  - Automatically closes all unclosed tags after truncation
 - Fixes display issues in Slack and other RSS readers with length limits
 - Prevents mid-tag cutoffs that show raw HTML
 

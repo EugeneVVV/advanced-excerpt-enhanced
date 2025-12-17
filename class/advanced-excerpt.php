@@ -43,6 +43,7 @@ class Advanced_Excerpt {
 		'max_top_level_list_items' => 0,
 		'max_top_level_structures' => 0,
 		'skip_headers' => 0,
+		'rss_max_length' => 0,
 	);
 
 	public $options_basic_tags; // Basic HTML tags (determines which tags are in the checklist by default)
@@ -673,6 +674,11 @@ class Advanced_Excerpt {
 		// Ensure no broken/partial tags at the end of excerpt
 		$out = $this->cleanup_broken_tags( $out );
 
+		// Enforce RSS max length if in feed and limit is set
+		if ( is_feed() && isset( $this->options['rss_max_length'] ) && $this->options['rss_max_length'] > 0 ) {
+			$out = $this->enforce_rss_max_length( $out, $this->options['rss_max_length'] );
+		}
+
 		return trim( $out );
 	}
 
@@ -726,6 +732,86 @@ class Advanced_Excerpt {
 		$text = preg_replace( '/<([a-zA-Z0-9]+)(?:\s+[^>]*)?$/s', '', $text );
 
 		return $text;
+	}
+
+	/**
+	 * Enforce RSS maximum character length
+	 * Truncates content if it exceeds the limit, ensuring tags remain valid
+	 * Slack recommended limit: 4000 chars, absolute max: 40000 chars
+	 *
+	 * @param string $text Excerpt text with HTML
+	 * @param int $max_length Maximum character length
+	 * @return string Truncated text with valid HTML
+	 */
+	function enforce_rss_max_length( $text, $max_length ) {
+		// Check if we're already within limit
+		if ( strlen( $text ) <= $max_length ) {
+			return $text;
+		}
+
+		// We need to truncate - but preserve valid HTML
+		// Strategy: Find a safe cut point before the limit
+		// Safe cut points: after complete closing tags, before opening tags
+
+		// Reserve space for ellipsis and potential tag closures (estimate 100 chars)
+		$safe_limit = $max_length - 100;
+
+		// Find all tag positions up to safe limit
+		$truncated = substr( $text, 0, $safe_limit );
+
+		// Find the last complete tag before our limit
+		// Look for last closing tag: </tagname>
+		if ( preg_match( '/^(.*<\/[a-zA-Z0-9]+>)/s', $truncated, $matches ) ) {
+			$truncated = $matches[1];
+		} else {
+			// No closing tags found - look for last complete text before any tag
+			if ( preg_match( '/^([^<]*)/s', $truncated, $matches ) ) {
+				$truncated = $matches[1];
+			}
+		}
+
+		// Now collect all unclosed tags and close them
+		preg_match_all( '/<([a-zA-Z0-9]+)(?:\s[^>]*)?>/', $truncated, $opening_tags );
+		preg_match_all( '/<\/([a-zA-Z0-9]+)>/', $truncated, $closing_tags );
+
+		// Build tag stack to find unclosed tags
+		$tag_stack = array();
+		$self_closing = array( 'br', 'hr', 'img', 'input', 'meta', 'link' );
+
+		// Find all tags in order
+		preg_match_all( '/<(\/?[a-zA-Z0-9]+)(?:\s[^>]*)?(\/)?>/i', $truncated, $all_tags, PREG_PATTERN_ORDER );
+
+		foreach ( $all_tags[1] as $index => $tag_name ) {
+			$is_closing = ( strpos( $tag_name, '/' ) === 0 );
+			$is_self_closing = ( ! empty( $all_tags[2][$index] ) || in_array( strtolower( $tag_name ), $self_closing ) );
+
+			if ( $is_closing ) {
+				$clean_tag = substr( $tag_name, 1 );
+				// Remove from stack
+				$key = array_search( $clean_tag, array_reverse( $tag_stack, true ) );
+				if ( $key !== false ) {
+					unset( $tag_stack[count($tag_stack) - 1 - $key] );
+					$tag_stack = array_values( $tag_stack );
+				}
+			} elseif ( ! $is_self_closing ) {
+				$tag_stack[] = strtolower( $tag_name );
+			}
+		}
+
+		// Close unclosed tags in reverse order
+		while ( ! empty( $tag_stack ) ) {
+			$tag = array_pop( $tag_stack );
+			$truncated .= '</' . $tag . '>';
+		}
+
+		// Final length check - if still too long, do more aggressive truncation
+		if ( strlen( $truncated ) > $max_length ) {
+			// Emergency fallback: just cut at character limit and remove any trailing partial tag
+			$truncated = substr( $text, 0, $max_length );
+			$truncated = $this->cleanup_broken_tags( $truncated );
+		}
+
+		return $truncated;
 	}
 
 	public function text_add_more( $text, $ellipsis, $read_more, $link_new_tab, $link_screen_reader ) {
@@ -800,6 +886,7 @@ class Advanced_Excerpt {
 		$this->options['max_list_items'] = isset( $_POST['max_list_items'] ) ? (int) $_POST['max_list_items'] : 0;
 		$this->options['max_top_level_list_items'] = isset( $_POST['max_top_level_list_items'] ) ? (int) $_POST['max_top_level_list_items'] : 0;
 		$this->options['max_top_level_structures'] = isset( $_POST['max_top_level_structures'] ) ? (int) $_POST['max_top_level_structures'] : 0;
+		$this->options['rss_max_length'] = isset( $_POST['rss_max_length'] ) ? (int) $_POST['rss_max_length'] : 0;
 
 		update_option( 'advanced_excerpt', $this->options );
 

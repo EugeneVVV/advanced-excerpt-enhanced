@@ -132,10 +132,21 @@
 					</tr>
 					<tr valign="top">
 						<th scope="row">
+							<label for="rss-max-length">
+							<?php _e( "RSS Max Length (chars):", 'advanced-excerpt' ); ?>
+							</label>
+						</th>
+						<td>
+							<input name="rss_max_length" type="number" id="rss-max-length" value="<?php echo isset( $rss_max_length ) ? $rss_max_length : 0; ?>" min="0" size="5" />
+							<p class="description"><?php _e( "Maximum character length for RSS feeds (recommended: 4000 for Slack, max: 40000). Set to 0 for no limit. When enabled, ensures RSS excerpts stay within this limit with valid HTML. Helps prevent broken HTML in Slack and other RSS readers with length restrictions.", 'advanced-excerpt' ); ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row">
 							<?php _e( "Read More Link:", 'advanced-excerpt' ); ?>
 						</th>
 						<td>
-							
+
 							<label for="add-link">
 							<input name="add_link" type="checkbox" id="add-link" value="on" <?php echo ( 1 == $add_link ) ? 'checked="checked"' : ''; ?> />
 							<?php _e( "Add read more link to excerpt", 'advanced-excerpt' ); ?>

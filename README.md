@@ -10,11 +10,13 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Fully compatible with pagination
 - OR logic: displays posts from ANY selected category
 
-### 2. **Smart Tag Closing**
+### 2. **Smart Tag Closing & RSS Safety**
 - **No more broken HTML in excerpts!**
 - Automatically tracks and closes all unclosed tags
 - Maintains proper nesting structure
 - **RSS-safe output** - perfect for feed readers
+- Removes broken/partial tags at excerpt end (fixes Slack & other readers)
+- RSS-specific line break cleanup (removes ALL `<br>` tags in feeds)
 
 ### 3. **Advanced List Handling**
 - Track nested list depth (UL/OL)
@@ -50,10 +52,11 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Creates natural-looking excerpt boundaries
 
 ### 9. **Line Break Cleanup**
-- Removes multiple consecutive `<br>` tags
+- Removes multiple consecutive `<br>` tags (max 1 in regular excerpts)
+- **RSS feeds**: Removes ALL `<br>` tags for better readability
 - Eliminates `<br>` between block elements
 - Clean, professional formatting
-- No awkward spacing issues
+- No awkward spacing issues in feeds or excerpts
 
 ### 10. **Excerpt Cut & Excerpt Only Shortcodes**
 - **[excerpt_cut]**: Hide content from excerpts, show in full posts
@@ -73,7 +76,9 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 | Feature | Before | After |
 |---------|--------|-------|
 | Tag Closing | ❌ Often broken | ✅ Always valid |
-| RSS Compatibility | ❌ Poor | ✅ Excellent |
+| RSS Compatibility | ❌ Poor, broken tags | ✅ Excellent, safe HTML |
+| RSS Line Breaks | ❌ Multiple `<br>` | ✅ All `<br>` removed |
+| Broken Tag Cleanup | ❌ Mid-tag cutoffs | ✅ Always clean tags |
 | List Handling | ❌ Basic | ✅ Advanced with depth tracking |
 | Table Support | ❌ Breaks mid-row | ✅ Clean row completion |
 | Line Breaks | ❌ Multiple/messy | ✅ Clean & minimal |
@@ -206,6 +211,12 @@ Control what appears in excerpts vs full posts:
 - Smart nested shortcode handling (automatically ignored)
 - Multiple use cases: hide details, show teasers, swap content between excerpt/post
 
+**RSS Feed Improvements:**
+- Removes ALL `<br>` tags in RSS feeds (not just duplicates)
+- Cleans up broken/partial HTML tags at excerpt end
+- Fixes display issues in Slack and other RSS readers with length limits
+- Prevents mid-tag cutoffs that show raw HTML
+
 **Other Features:**
 - Homepage category filter with multi-select
 - Smart tag closing for RSS-safe excerpts
@@ -213,7 +224,7 @@ Control what appears in excerpts vs full posts:
 - List/Table ellipsis markers
 - Block finish mode with 37 block-level tags
 - Header content skipping
-- Line break cleanup
+- Enhanced line break cleanup (feed-aware)
 - Version upgrade detection for existing installations
 
 ### Original Version 4.4.1

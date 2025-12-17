@@ -670,12 +670,23 @@ class Advanced_Excerpt {
 		// Clean up multiple line breaks and unnecessary br tags
 		$out = $this->cleanup_line_breaks( $out );
 
+		// Ensure no broken/partial tags at the end of excerpt
+		$out = $this->cleanup_broken_tags( $out );
+
 		return trim( $out );
 	}
 
 	function cleanup_line_breaks( $text ) {
-		// Remove multiple consecutive <br> tags (keep max 1)
-		$text = preg_replace( '/<br\s*\/?>\s*(?:<br\s*\/?>\s*)+/i', '<br />', $text );
+		$is_feed = is_feed();
+
+		if ( $is_feed ) {
+			// In RSS feeds: remove ALL <br> tags for better readability
+			// Block-level tags provide sufficient spacing in feed readers
+			$text = preg_replace( '/<br\s*\/?>/i', '', $text );
+		} else {
+			// In regular excerpts: keep max 1 consecutive <br>
+			$text = preg_replace( '/<br\s*\/?>\s*(?:<br\s*\/?>\s*)+/i', '<br />', $text );
+		}
 
 		// Remove <br> that appears right before block-level closing tags
 		$block_tags = array( 'p', 'div', 'blockquote', 'li', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section', 'header', 'footer', 'aside', 'nav' );
@@ -690,6 +701,29 @@ class Advanced_Excerpt {
 
 		// Remove <br> between block-level tags (e.g., </p><br><p> becomes </p><p>)
 		$text = preg_replace( '/<\/(p|div|blockquote|h[1-6]|article|section|header|footer|aside|nav)>\s*<br\s*\/?>\s*<(p|div|blockquote|h[1-6]|article|section|header|footer|aside|nav)/i', '</$1><$2', $text );
+
+		return $text;
+	}
+
+	/**
+	 * Remove broken/partial HTML tags at the end of excerpt
+	 * Fixes issue where RSS readers with length limits cut mid-tag
+	 *
+	 * @param string $text Excerpt text
+	 * @return string Text with broken tags removed
+	 */
+	function cleanup_broken_tags( $text ) {
+		// Find the last complete closing tag position
+		// Look for any incomplete tag at the end (starts with < but doesn't close with >)
+		if ( preg_match( '/^(.*>)(<[^>]*)$/s', $text, $matches ) ) {
+			// Found incomplete tag at end - remove it
+			$text = $matches[1];
+		}
+
+		// Also check for broken opening tags that might have partial attributes
+		// Pattern: <tagname some-attr="partial
+		// This handles cases where tag was cut mid-attribute
+		$text = preg_replace( '/<([a-zA-Z0-9]+)(?:\s+[^>]*)?$/s', '', $text );
 
 		return $text;
 	}

@@ -55,12 +55,18 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Clean, professional formatting
 - No awkward spacing issues
 
-### 10. **Excerpt Cut Markers**
-- Mark sections of content to exclude from excerpts
-- Use `[excerpt_cut]...[/excerpt_cut]` shortcodes
-- Support for multiple cut sections per post
-- Unpaired markers cut to end of post
-- Markers invisible in rendered posts
+### 10. **Excerpt Cut & Excerpt Only Shortcodes**
+- **[excerpt_cut]**: Hide content from excerpts, show in full posts
+  - Optional `text` parameter for replacement text in excerpts
+  - `[excerpt_cut]hidden content[/excerpt_cut]` - removes from excerpt
+  - `[excerpt_cut text="Summary..."]detailed content[/excerpt_cut]` - shows summary in excerpt
+- **[excerpt_only]**: Show content only in excerpts, hide from full posts
+  - Optional `text` parameter for replacement text in full posts
+  - `[excerpt_only]teaser text[/excerpt_only]` - only in excerpts
+  - `[excerpt_only text="Full details..."]teaser[/excerpt_only]` - swap content
+- Multiple sections supported
+- Nested shortcodes automatically ignored
+- Unpaired `[excerpt_cut]` cuts to end of post
 
 ## 📊 Key Improvements
 
@@ -119,45 +125,96 @@ the_advanced_excerpt('length=50&length_type=words&skip_headers=1&max_list_items=
 3. Select desired categories
 4. Ensure Settings → Reading is set to "Your latest posts"
 
-### Excerpt Cut Markers
-Exclude specific sections from excerpts while keeping them in full posts:
+### Excerpt Shortcodes
+Control what appears in excerpts vs full posts:
+
+#### Basic Usage - Hide from Excerpts
 
 ```html
-<p>This appears in excerpt.</p>
+<p>This appears everywhere.</p>
 
 [excerpt_cut]
-<h2>This heading is hidden from excerpts</h2>
-<p>This content won't appear in excerpts.</p>
+<h2>This heading only appears in full post</h2>
+<p>This detailed content is hidden from excerpts.</p>
+[/excerpt_cut]
+
+<p>This also appears everywhere.</p>
+```
+
+#### Advanced - Replacement Text
+
+```html
+<p>Introduction text...</p>
+
+[excerpt_cut text="Read the full analysis in the post..."]
+<h2>Detailed Analysis</h2>
+<p>Five paragraphs of in-depth analysis...</p>
 <ul>
-  <li>Hidden list item 1</li>
-  <li>Hidden list item 2</li>
+  <li>Complex point 1</li>
+  <li>Complex point 2</li>
 </ul>
 [/excerpt_cut]
 
-<p>This also appears in excerpt.</p>
-
-[excerpt_cut]
-<p>Another hidden section.</p>
-[/excerpt_cut]
-
-<p>Final visible paragraph.</p>
+<p>Conclusion...</p>
 ```
 
-**Features:**
-- Multiple cut sections supported
-- Unpaired `[excerpt_cut]` cuts everything to end of post
-- Markers are invisible in rendered posts (no visual impact)
-- Works with all other excerpt features (lists, tables, headers, etc.)
+**Excerpt shows:** "Introduction text... Read the full analysis in the post... Conclusion..."
+**Full post shows:** All content including the detailed analysis
 
-**Important Notes:**
-- Nested `[excerpt_cut]` markers are ignored (treated as literal text within the cut section)
-- Orphaned `[/excerpt_cut]` markers without opening tags are ignored
-- This ensures predictable behavior and prevents malformed markup
+#### Excerpt-Only Content
+
+```html
+<p>Article introduction...</p>
+
+[excerpt_only]
+<p><strong>Click to read more about this fascinating topic!</strong></p>
+[/excerpt_only]
+
+<p>Main article content continues...</p>
+```
+
+**Excerpt shows:** The teaser call-to-action
+**Full post shows:** Just the main content (teaser hidden)
+
+#### Swapping Content
+
+```html
+[excerpt_only text="<p>This article explores advanced techniques...</p>"]
+<p><strong>Subscribe to read this exclusive content!</strong></p>
+[/excerpt_only]
+
+<p>Article content here...</p>
+```
+
+**Excerpt shows:** "Subscribe to read this exclusive content!"
+**Full post shows:** "This article explores advanced techniques..."
+
+**Features:**
+- Multiple sections supported in one post
+- `[excerpt_cut]` - hide from excerpts (with optional replacement)
+- `[excerpt_only]` - show only in excerpts (with optional post replacement)
+- Nested shortcodes automatically ignored
+- Unpaired `[excerpt_cut]` cuts to end of post
+- Works with all other excerpt features
 
 ## 📝 Changelog
 
 ### Version 4.4.2-fork
-- Initial release
+**New Shortcodes:**
+- `[excerpt_cut]` with optional `text` parameter for replacement content in excerpts
+- `[excerpt_only]` with optional `text` parameter for replacement content in full posts
+- Smart nested shortcode handling (automatically ignored)
+- Multiple use cases: hide details, show teasers, swap content between excerpt/post
+
+**Other Features:**
+- Homepage category filter with multi-select
+- Smart tag closing for RSS-safe excerpts
+- Advanced list/table handling with limits
+- List/Table ellipsis markers
+- Block finish mode with 37 block-level tags
+- Header content skipping
+- Line break cleanup
+- Version upgrade detection for existing installations
 
 ### Original Version 4.4.1
 - See readme.txt for original changelog

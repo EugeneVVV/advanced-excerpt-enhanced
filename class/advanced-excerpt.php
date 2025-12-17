@@ -92,8 +92,9 @@ class Advanced_Excerpt {
 		add_action( 'loop_start', array( $this, 'hook_content_filters' ) );
 		add_action( 'pre_get_posts', array( $this, 'filter_homepage_category' ) );
 
-		// Register excerpt cut shortcode (returns empty string so markers don't appear in post display)
+		// Register excerpt shortcodes (return empty string so markers don't appear in post display)
 		add_shortcode( 'excerpt_cut', array( $this, 'excerpt_cut_shortcode' ) );
+		add_shortcode( 'excerpt_only', array( $this, 'excerpt_only_shortcode' ) );
 	}
 
 	function hook_content_filters() {
@@ -830,99 +831,77 @@ class Advanced_Excerpt {
 	 * Shortcode handler for [excerpt_cut] and [/excerpt_cut]
 	 * Returns empty string so markers don't appear in post display
 	 *
-	 * @return string Empty string
+	 * @param array $atts Shortcode attributes
+	 * @param string $content Content between opening and closing tags
+	 * @return string Content (shown in full post, hidden in excerpt via processing)
 	 */
-	function excerpt_cut_shortcode() {
-		return '';
+	function excerpt_cut_shortcode( $atts, $content = '' ) {
+		// In full post display, just return the content without the shortcode wrapper
+		return $content;
 	}
 
 	/**
-	 * Remove content marked with [excerpt_cut]...[/excerpt_cut] from text
-	 * Supports multiple pairs and unpaired opening tags (cuts to end)
-	 * Nested [excerpt_cut] markers are ignored (treated as literal text)
-	 * Orphaned [/excerpt_cut] markers without opening tags are ignored
+	 * Shortcode handler for [excerpt_only] and [/excerpt_only]
+	 * Returns empty string so markers don't appear in post display
+	 *
+	 * @param array $atts Shortcode attributes (text = replacement for full post)
+	 * @param string $content Content between opening and closing tags
+	 * @return string Replacement text or empty string (content shown in excerpt via processing)
+	 */
+	function excerpt_only_shortcode( $atts, $content = '' ) {
+		// In full post display, return the replacement text if specified, otherwise empty
+		$atts = shortcode_atts( array( 'text' => '' ), $atts );
+		return $atts['text'];
+	}
+
+	/**
+	 * Process excerpt_cut and excerpt_only shortcodes for excerpts
+	 * - [excerpt_cut]content[/excerpt_cut] or [excerpt_cut text="replacement"]content[/excerpt_cut]
+	 *   Hides content from excerpt, optionally shows replacement text
+	 * - [excerpt_only]content[/excerpt_only] or [excerpt_only text="post replacement"]content[/excerpt_only]
+	 *   Shows content only in excerpt (already handled by shortcode for post display)
+	 *
+	 * Ignores nested shortcodes (excerpt_cut within excerpt_only and vice versa)
 	 *
 	 * @param string $content Post content
-	 * @return string Content with marked sections removed
+	 * @return string Content processed for excerpt display
 	 */
 	function remove_excerpt_cut_sections( $content ) {
-		// Pattern to find shortcodes: [excerpt_cut] and [/excerpt_cut]
-		$start_pattern = '/\[excerpt_cut\]/i';
-		$end_pattern = '/\[\/excerpt_cut\]/i';
+		// First, handle excerpt_only sections - keep the content, remove the shortcode wrapper
+		// Pattern matches: [excerpt_only], [excerpt_only text="..."], and [/excerpt_only]
+		$content = preg_replace_callback(
+			'/\[excerpt_only(?:\s+text=["\']([^"\']*)["\'])?\](.*?)\[\/excerpt_only\]/is',
+			function( $matches ) {
+				// In excerpt: show the content (ignore the text parameter which is for full post)
+				return $matches[2]; // Return content between tags
+			},
+			$content
+		);
 
-		// Find all start positions
-		preg_match_all( $start_pattern, $content, $start_matches, PREG_OFFSET_CAPTURE );
-		// Find all end positions
-		preg_match_all( $end_pattern, $content, $end_matches, PREG_OFFSET_CAPTURE );
+		// Remove orphaned excerpt_only markers
+		$content = preg_replace( '/\[excerpt_only(?:\s+text=["\'][^"\']*["\'])?\]/i', '', $content );
+		$content = preg_replace( '/\[\/excerpt_only\]/i', '', $content );
 
-		// If no start markers, just remove any orphaned end markers and return
-		if ( empty( $start_matches[0] ) ) {
-			if ( ! empty( $end_matches[0] ) ) {
-				// Remove orphaned [/excerpt_cut] markers
-				$content = preg_replace( $end_pattern, '', $content );
-			}
-			return $content;
+		// Now handle excerpt_cut sections - remove content or replace with text parameter
+		// Pattern matches: [excerpt_cut], [excerpt_cut text="..."], and [/excerpt_cut]
+		$content = preg_replace_callback(
+			'/\[excerpt_cut(?:\s+text=["\']([^"\']*)["\'])?\](.*?)\[\/excerpt_cut\]/is',
+			function( $matches ) {
+				// In excerpt: replace with text parameter if provided, otherwise remove entirely
+				return isset( $matches[1] ) && $matches[1] !== '' ? $matches[1] : '';
+			},
+			$content
+		);
+
+		// Handle unpaired excerpt_cut (cuts to end of content)
+		if ( preg_match( '/\[excerpt_cut(?:\s+text=["\']([^"\']*)["\'])?\]/i', $content, $match, PREG_OFFSET_CAPTURE ) ) {
+			$start_pos = $match[0][1];
+			$replacement = isset( $match[1][0] ) ? $match[1][0] : '';
+			$content = substr( $content, 0, $start_pos ) . $replacement;
 		}
 
-		$start_positions = array();
-		foreach ( $start_matches[0] as $match ) {
-			$start_positions[] = $match[1]; // offset
-		}
-
-		$end_positions = array();
-		foreach ( $end_matches[0] as $match ) {
-			$end_positions[] = $match[1]; // offset
-		}
-
-		// Build array of regions to cut: [start_offset, end_offset]
-		// Properly pair markers, ignoring nested starts and orphaned ends
-		$cut_regions = array();
-		$start_index = 0;
-		$end_index = 0;
-
-		while ( $start_index < count( $start_positions ) ) {
-			$start_pos = $start_positions[ $start_index ];
-
-			// Find the next end marker after this start
-			$found_end = false;
-			while ( $end_index < count( $end_positions ) ) {
-				if ( $end_positions[$end_index] > $start_pos ) {
-					// Found matching end
-					$end_pos = $end_positions[$end_index] + strlen( '[/excerpt_cut]' );
-					$cut_regions[] = array( $start_pos, $end_pos );
-
-					// Skip any start markers that fall within this cut region (nested markers)
-					// They should be ignored since they're inside a cut section
-					$start_index++;
-					while ( $start_index < count( $start_positions ) && $start_positions[$start_index] < $end_pos ) {
-						$start_index++; // Skip nested start markers
-					}
-
-					$end_index++; // Move past this end marker
-					$found_end = true;
-					break;
-				}
-				$end_index++; // Skip orphaned end markers that come before current start
-			}
-
-			if ( ! $found_end ) {
-				// No closing tag - cut to end of content
-				$cut_regions[] = array( $start_pos, strlen( $content ) );
-				break; // No more processing needed - everything after this is cut
-			}
-		}
-
-		// Remove regions in reverse order to preserve offsets
-		$cut_regions = array_reverse( $cut_regions );
-
-		foreach ( $cut_regions as $region ) {
-			list( $start, $end ) = $region;
-			$content = substr_replace( $content, '', $start, $end - $start );
-		}
-
-		// Remove any remaining orphaned [/excerpt_cut] markers that weren't paired
-		// (These would be end markers that appeared before any start markers)
-		$content = preg_replace( $end_pattern, '', $content );
+		// Remove orphaned excerpt_cut closing markers
+		$content = preg_replace( '/\[\/excerpt_cut\]/i', '', $content );
 
 		return $content;
 	}

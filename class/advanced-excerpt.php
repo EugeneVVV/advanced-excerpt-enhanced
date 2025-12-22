@@ -759,10 +759,11 @@ class Advanced_Excerpt {
 	}
 
 	/**
-	 * Recursively convert nested lists with proper indentation and alternating styles
+	 * Convert nested lists iteratively from innermost to outermost
+	 * Prevents infinite recursion and memory issues
 	 *
 	 * @param string $text Text containing lists
-	 * @param int $depth Current nesting depth (0-based)
+	 * @param int $depth Starting depth (0-based)
 	 * @return string Converted text
 	 */
 	function convert_nested_lists( $text, $depth = 0 ) {
@@ -770,86 +771,93 @@ class Advanced_Excerpt {
 		// Using U+2022 (•), U+25E6 (◦), U+25AA (▪), U+25AB (▫) for consistent sizing
 		$bullet_styles = array( '•', '◦', '▪', '▫' );
 
-		// Numbering styles by depth: 1. a. i. 1)
-		// For simplicity, we'll use: 1. a) i) alternating
+		// Safety: prevent infinite loops with max depth and iteration limits
+		$max_depth = 10;
+		$max_iterations = 50;
+		$iteration = 0;
 
-		$indent = str_repeat( '  ', $depth ); // 2 spaces per level
+		// Process lists from innermost to outermost (bottom-up approach)
+		// This prevents recursion issues and memory problems
+		while ( ( strpos( $text, '<ul' ) !== false || strpos( $text, '<ol' ) !== false ) && $iteration < $max_iterations ) {
+			$iteration++;
+			$original_text = $text;
 
-		// Process unordered lists at current depth
-		$text = preg_replace_callback(
-			'/<ul[^>]*>(.*?)<\/ul>/is',
-			function( $matches ) use ( $depth, $bullet_styles, $indent ) {
-				$content = $matches[1];
+			// Find the deepest lists first (those without nested lists)
+			// Match lists that don't contain other list tags
+			$text = preg_replace_callback(
+				'/<ul[^>]*>(?:(?!<ul|<ol).)*?<\/ul>/is',
+				function( $matches ) use ( $bullet_styles, $depth, $max_depth ) {
+					// Calculate depth based on how many levels deep we are
+					// Count preceding list markers to estimate depth
+					$content = $matches[0];
+					$current_depth = min( $depth, $max_depth - 1 );
 
-				// First, recursively process any nested lists within this one
-				$content = $this->convert_nested_lists( $content, $depth + 1 );
+					// Get bullet style for current depth
+					$bullet = $bullet_styles[ $current_depth % count( $bullet_styles ) ];
+					$indent = str_repeat( '  ', $current_depth );
 
-				// Get bullet style for current depth
-				$bullet = $bullet_styles[ $depth % count( $bullet_styles ) ];
+					// Extract list items
+					$content = preg_replace_callback(
+						'/<li[^>]*>(.*?)<\/li>/is',
+						function( $li_matches ) use ( $bullet, $indent ) {
+							$item_content = trim( strip_tags( $li_matches[1] ) );
+							// Add indentation to multi-line items
+							$item_content = str_replace( "\n", "\n" . $indent . '  ', $item_content );
+							return "\n" . $indent . $bullet . ' ' . $item_content;
+						},
+						$content
+					);
 
-				// Extract list items at current level only (not already converted nested ones)
-				$content = preg_replace_callback(
-					'/<li[^>]*>(.*?)<\/li>/is',
-					function( $li_matches ) use ( $bullet, $indent ) {
-						$item_content = trim( $li_matches[1] );
-						// Add indentation to all lines in multi-line items
-						$item_content = str_replace( "\n", "\n" . $indent . '  ', $item_content );
-						return "\n" . $indent . $bullet . ' ' . $item_content;
-					},
-					$content
-				);
+					// Remove the ul tags
+					$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
+					return $content . "\n";
+				},
+				$text
+			);
 
-				// Remove any remaining ul tags
-				$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
+			// Process ordered lists similarly
+			$text = preg_replace_callback(
+				'/<ol[^>]*>(?:(?!<ul|<ol).)*?<\/ol>/is',
+				function( $matches ) use ( $depth, $max_depth ) {
+					$content = $matches[0];
+					$current_depth = min( $depth, $max_depth - 1 );
+					$indent = str_repeat( '  ', $current_depth );
 
-				return $content . "\n";
-			},
-			$text
-		);
+					// Extract list items
+					preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
+					$result = '';
 
-		// Process ordered lists at current depth
-		$text = preg_replace_callback(
-			'/<ol[^>]*>(.*?)<\/ol>/is',
-			function( $matches ) use ( $depth, $indent ) {
-				$content = $matches[1];
+					foreach ( $items[1] as $index => $item ) {
+						$item_content = trim( strip_tags( $item ) );
 
-				// First, recursively process any nested lists
-				$content = $this->convert_nested_lists( $content, $depth + 1 );
+						// Different numbering styles by depth
+						if ( $current_depth % 3 == 0 ) {
+							$marker = ( $index + 1 ) . '.';
+						} elseif ( $current_depth % 3 == 1 ) {
+							$marker = chr( 97 + ( $index % 26 ) ) . ')';
+						} else {
+							$roman = array( 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x' );
+							$marker = ( isset( $roman[$index] ) ? $roman[$index] : ( $index + 1 ) ) . ')';
+						}
 
-				// Extract list items and number them
-				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
-				$result = '';
-
-				foreach ( $items[1] as $index => $item ) {
-					$item_content = trim( $item );
-
-					// Different numbering styles by depth
-					if ( $depth % 3 == 0 ) {
-						// Level 0, 3, 6: 1. 2. 3.
-						$marker = ( $index + 1 ) . '.';
-					} elseif ( $depth % 3 == 1 ) {
-						// Level 1, 4, 7: a) b) c)
-						$marker = chr( 97 + ( $index % 26 ) ) . ')';
-					} else {
-						// Level 2, 5, 8: i) ii) iii)
-						$roman = array( 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x' );
-						$marker = ( isset( $roman[$index] ) ? $roman[$index] : ( $index + 1 ) ) . ')';
+						// Add indentation to multi-line items
+						$item_content = str_replace( "\n", "\n" . $indent . '   ', $item_content );
+						$result .= "\n" . $indent . $marker . ' ' . $item_content;
 					}
 
-					// Add indentation to multi-line items
-					$item_content = str_replace( "\n", "\n" . $indent . '   ', $item_content );
-					$result .= "\n" . $indent . $marker . ' ' . $item_content;
-				}
+					return $result . "\n";
+				},
+				$text
+			);
 
-				// Remove any remaining ol tags
-				$result = preg_replace( '/<\/?ol[^>]*>/i', '', $result );
+			// If nothing changed, break to prevent infinite loop
+			if ( $original_text === $text ) {
+				break;
+			}
+		}
 
-				return $result . "\n";
-			},
-			$text
-		);
-
-		// Clean up any remaining stray list tags
+		// Clean up any remaining stray list tags (safety fallback)
+		$text = preg_replace( '/<\/?[uo]l[^>]*>/i', '', $text );
 		$text = preg_replace( '/<\/?li[^>]*>/i', '', $text );
 
 		return $text;

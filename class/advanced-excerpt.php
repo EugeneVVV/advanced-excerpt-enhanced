@@ -766,8 +766,9 @@ class Advanced_Excerpt {
 	 * @return string Converted text
 	 */
 	function convert_nested_lists( $text, $depth = 0 ) {
-		// Bullet styles by depth (like browsers): • ○ ▪ ▫
-		$bullet_styles = array( '•', '○', '▪', '▫' );
+		// Bullet styles by depth (like browsers): • ◦ ▪ ▫
+		// Using U+2022 (•), U+25E6 (◦), U+25AA (▪), U+25AB (▫) for consistent sizing
+		$bullet_styles = array( '•', '◦', '▪', '▫' );
 
 		// Numbering styles by depth: 1. a. i. 1)
 		// For simplicity, we'll use: 1. a) i) alternating

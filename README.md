@@ -18,11 +18,12 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Removes broken/partial tags at excerpt end (fixes Slack & other readers)
 - RSS-specific line break cleanup (removes ALL `<br>` tags in feeds)
 - **Slack-optimized list formatting** - converts HTML lists to formatted text
-  - `<ul>` → alternating bullet styles by depth (• ○ ▪ ▫)
+  - `<ul>` → alternating bullet styles by depth (• ◦ ▪ ▫)
   - `<ol>` → alternating numbering styles (1. a) i))
   - Proper indentation for nested lists (2 spaces per level)
   - Multi-line list items properly indented
   - Browser-style formatting for familiar appearance
+  - Uses size-consistent Unicode bullets (U+2022, U+25E6, U+25AA, U+25AB)
   - Works around Slack's limited HTML support
 - **Additional tag conversions** for better compatibility
   - `<blockquote>` → markdown-style quoted text (> prefix)

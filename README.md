@@ -17,6 +17,11 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - **RSS-safe output** - perfect for feed readers
 - Removes broken/partial tags at excerpt end (fixes Slack & other readers)
 - RSS-specific line break cleanup (removes ALL `<br>` tags in feeds)
+- **Slack-optimized list formatting** - converts HTML lists to bullet points
+  - `<ul>` → bullet points (•) with proper spacing
+  - `<ol>` → numbered lists (1., 2., 3.)
+  - Handles nested lists with indentation
+  - Works around Slack's limited HTML support
 
 ### 3. **Advanced List Handling**
 - Track nested list depth (UL/OL)
@@ -219,6 +224,12 @@ Control what appears in excerpts vs full posts:
 **RSS Feed Improvements:**
 - Removes ALL `<br>` tags in RSS feeds (not just duplicates)
 - Cleans up broken/partial HTML tags at excerpt end
+- **Slack-friendly list conversion** - HTML lists → formatted text
+  - Converts `<ul>/<li>` to bullet points (•) with line breaks
+  - Converts `<ol>/<li>` to numbered lists (1., 2., 3.)
+  - Handles nested lists with indentation (basic support)
+  - Workaround for Slack's limited HTML tag support
+  - Prevents lists from appearing as wall of text with extra line breaks
 - **RSS Max Length setting** enforces character limits (recommended: 4000 for Slack)
   - Slack recommended limit: 4000 characters for optimal display
   - Slack absolute max: 40000 characters (messages truncated after)

@@ -674,6 +674,11 @@ class Advanced_Excerpt {
 		// Ensure no broken/partial tags at the end of excerpt
 		$out = $this->cleanup_broken_tags( $out );
 
+		// Convert HTML lists to Slack-friendly format in RSS feeds
+		if ( is_feed() ) {
+			$out = $this->convert_lists_for_slack( $out );
+		}
+
 		// Enforce RSS max length if in feed and limit is set
 		if ( is_feed() && isset( $this->options['rss_max_length'] ) && $this->options['rss_max_length'] > 0 ) {
 			$out = $this->enforce_rss_max_length( $out, $this->options['rss_max_length'] );
@@ -730,6 +735,65 @@ class Advanced_Excerpt {
 		// Pattern: <tagname some-attr="partial
 		// This handles cases where tag was cut mid-attribute
 		$text = preg_replace( '/<([a-zA-Z0-9]+)(?:\s+[^>]*)?$/s', '', $text );
+
+		return $text;
+	}
+
+	/**
+	 * Convert HTML lists to Slack-friendly format
+	 * Slack has limited HTML support - converts lists to bullet points with proper indentation
+	 * Based on Slack's mrkdwn format requirements
+	 *
+	 * @param string $text Excerpt text with HTML lists
+	 * @return string Text with lists converted to Slack-friendly format
+	 */
+	function convert_lists_for_slack( $text ) {
+		// Convert unordered lists (UL) with bullets
+		// Pattern: <ul>...<li>item</li>...</ul>
+		$text = preg_replace_callback(
+			'/<ul[^>]*>(.*?)<\/ul>/is',
+			function( $matches ) {
+				$content = $matches[1];
+				// Extract list items and convert to bullet format
+				$content = preg_replace( '/<li[^>]*>(.*?)<\/li>/is', '• $1', $content );
+				// Clean up any remaining list tags
+				$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
+				// Ensure each bullet starts on new line
+				$content = preg_replace( '/•\s*/s', "\n• ", $content );
+				// Remove leading newline if present
+				$content = ltrim( $content, "\n" );
+				return "\n" . $content . "\n";
+			},
+			$text
+		);
+
+		// Convert ordered lists (OL) with numbers
+		$text = preg_replace_callback(
+			'/<ol[^>]*>(.*?)<\/ol>/is',
+			function( $matches ) {
+				$content = $matches[1];
+				// Extract list items
+				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
+				$result = "\n";
+				foreach ( $items[1] as $index => $item ) {
+					$num = $index + 1;
+					$result .= $num . '. ' . trim( $item ) . "\n";
+				}
+				return $result;
+			},
+			$text
+		);
+
+		// Clean up any remaining stray list tags (nested or malformed)
+		$text = preg_replace( '/<\/?[uo]l[^>]*>/i', '', $text );
+		$text = preg_replace( '/<\/?li[^>]*>/i', '', $text );
+
+		// Convert nested lists (already within converted format) - add indentation
+		// This handles simple nesting - indent with spaces
+		$text = preg_replace( '/\n(•|\d+\.)\s+\n(•|\d+\.)/s', "\n$1\n  $2", $text );
+
+		// Clean up excessive newlines that might result from list conversion
+		$text = preg_replace( '/\n{3,}/', "\n\n", $text );
 
 		return $text;
 	}

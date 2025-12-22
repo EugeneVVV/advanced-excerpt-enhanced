@@ -674,9 +674,10 @@ class Advanced_Excerpt {
 		// Ensure no broken/partial tags at the end of excerpt
 		$out = $this->cleanup_broken_tags( $out );
 
-		// Convert HTML lists to Slack-friendly format in RSS feeds
+		// Convert HTML lists and other unsupported tags to Slack-friendly format in RSS feeds
 		if ( is_feed() ) {
 			$out = $this->convert_lists_for_slack( $out );
+			$out = $this->convert_other_tags_for_slack( $out );
 		}
 
 		// Enforce RSS max length if in feed and limit is set
@@ -740,60 +741,170 @@ class Advanced_Excerpt {
 	}
 
 	/**
-	 * Convert HTML lists to Slack-friendly format
-	 * Slack has limited HTML support - converts lists to bullet points with proper indentation
-	 * Based on Slack's mrkdwn format requirements
+	 * Convert HTML lists to Slack-friendly format with proper nesting
+	 * Slack has limited HTML support - converts lists to formatted text
+	 * Uses browser-style alternating bullets and numbering for nested lists
 	 *
 	 * @param string $text Excerpt text with HTML lists
 	 * @return string Text with lists converted to Slack-friendly format
 	 */
 	function convert_lists_for_slack( $text ) {
-		// Convert unordered lists (UL) with bullets
-		// Pattern: <ul>...<li>item</li>...</ul>
-		$text = preg_replace_callback(
-			'/<ul[^>]*>(.*?)<\/ul>/is',
-			function( $matches ) {
-				$content = $matches[1];
-				// Extract list items and convert to bullet format
-				$content = preg_replace( '/<li[^>]*>(.*?)<\/li>/is', '• $1', $content );
-				// Clean up any remaining list tags
-				$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
-				// Ensure each bullet starts on new line
-				$content = preg_replace( '/•\s*/s', "\n• ", $content );
-				// Remove leading newline if present
-				$content = ltrim( $content, "\n" );
-				return "\n" . $content . "\n";
-			},
-			$text
-		);
-
-		// Convert ordered lists (OL) with numbers
-		$text = preg_replace_callback(
-			'/<ol[^>]*>(.*?)<\/ol>/is',
-			function( $matches ) {
-				$content = $matches[1];
-				// Extract list items
-				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
-				$result = "\n";
-				foreach ( $items[1] as $index => $item ) {
-					$num = $index + 1;
-					$result .= $num . '. ' . trim( $item ) . "\n";
-				}
-				return $result;
-			},
-			$text
-		);
-
-		// Clean up any remaining stray list tags (nested or malformed)
-		$text = preg_replace( '/<\/?[uo]l[^>]*>/i', '', $text );
-		$text = preg_replace( '/<\/?li[^>]*>/i', '', $text );
-
-		// Convert nested lists (already within converted format) - add indentation
-		// This handles simple nesting - indent with spaces
-		$text = preg_replace( '/\n(•|\d+\.)\s+\n(•|\d+\.)/s', "\n$1\n  $2", $text );
+		// Process lists recursively to handle nesting properly
+		$text = $this->convert_nested_lists( $text, 0 );
 
 		// Clean up excessive newlines that might result from list conversion
 		$text = preg_replace( '/\n{3,}/', "\n\n", $text );
+
+		return $text;
+	}
+
+	/**
+	 * Recursively convert nested lists with proper indentation and alternating styles
+	 *
+	 * @param string $text Text containing lists
+	 * @param int $depth Current nesting depth (0-based)
+	 * @return string Converted text
+	 */
+	function convert_nested_lists( $text, $depth = 0 ) {
+		// Bullet styles by depth (like browsers): • ○ ▪ ▫
+		$bullet_styles = array( '•', '○', '▪', '▫' );
+
+		// Numbering styles by depth: 1. a. i. 1)
+		// For simplicity, we'll use: 1. a) i) alternating
+
+		$indent = str_repeat( '  ', $depth ); // 2 spaces per level
+
+		// Process unordered lists at current depth
+		$text = preg_replace_callback(
+			'/<ul[^>]*>(.*?)<\/ul>/is',
+			function( $matches ) use ( $depth, $bullet_styles, $indent ) {
+				$content = $matches[1];
+
+				// First, recursively process any nested lists within this one
+				$content = $this->convert_nested_lists( $content, $depth + 1 );
+
+				// Get bullet style for current depth
+				$bullet = $bullet_styles[ $depth % count( $bullet_styles ) ];
+
+				// Extract list items at current level only (not already converted nested ones)
+				$content = preg_replace_callback(
+					'/<li[^>]*>(.*?)<\/li>/is',
+					function( $li_matches ) use ( $bullet, $indent ) {
+						$item_content = trim( $li_matches[1] );
+						// Add indentation to all lines in multi-line items
+						$item_content = str_replace( "\n", "\n" . $indent . '  ', $item_content );
+						return "\n" . $indent . $bullet . ' ' . $item_content;
+					},
+					$content
+				);
+
+				// Remove any remaining ul tags
+				$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
+
+				return $content . "\n";
+			},
+			$text
+		);
+
+		// Process ordered lists at current depth
+		$text = preg_replace_callback(
+			'/<ol[^>]*>(.*?)<\/ol>/is',
+			function( $matches ) use ( $depth, $indent ) {
+				$content = $matches[1];
+
+				// First, recursively process any nested lists
+				$content = $this->convert_nested_lists( $content, $depth + 1 );
+
+				// Extract list items and number them
+				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
+				$result = '';
+
+				foreach ( $items[1] as $index => $item ) {
+					$item_content = trim( $item );
+
+					// Different numbering styles by depth
+					if ( $depth % 3 == 0 ) {
+						// Level 0, 3, 6: 1. 2. 3.
+						$marker = ( $index + 1 ) . '.';
+					} elseif ( $depth % 3 == 1 ) {
+						// Level 1, 4, 7: a) b) c)
+						$marker = chr( 97 + ( $index % 26 ) ) . ')';
+					} else {
+						// Level 2, 5, 8: i) ii) iii)
+						$roman = array( 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x' );
+						$marker = ( isset( $roman[$index] ) ? $roman[$index] : ( $index + 1 ) ) . ')';
+					}
+
+					// Add indentation to multi-line items
+					$item_content = str_replace( "\n", "\n" . $indent . '   ', $item_content );
+					$result .= "\n" . $indent . $marker . ' ' . $item_content;
+				}
+
+				// Remove any remaining ol tags
+				$result = preg_replace( '/<\/?ol[^>]*>/i', '', $result );
+
+				return $result . "\n";
+			},
+			$text
+		);
+
+		// Clean up any remaining stray list tags
+		$text = preg_replace( '/<\/?li[^>]*>/i', '', $text );
+
+		return $text;
+	}
+
+	/**
+	 * Convert other HTML tags that Slack doesn't support well
+	 * Only converts tags that won't interfere with existing functionality
+	 * Called AFTER all excerpt processing (tag closing, structure limiting, etc.)
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Converted text
+	 */
+	function convert_other_tags_for_slack( $text ) {
+		// Convert definition lists (DL/DT/DD) to readable format
+		// <dl><dt>Term</dt><dd>Definition</dd></dl> → "**Term:** Definition"
+		$text = preg_replace_callback(
+			'/<dl[^>]*>(.*?)<\/dl>/is',
+			function( $matches ) {
+				$content = $matches[1];
+				// Convert DT/DD pairs
+				$content = preg_replace( '/<dt[^>]*>(.*?)<\/dt>\s*<dd[^>]*>(.*?)<\/dd>/is', "\n**$1:** $2", $content );
+				// Clean up remaining tags
+				$content = preg_replace( '/<\/?d[tld][^>]*>/i', '', $content );
+				return $content;
+			},
+			$text
+		);
+
+		// Convert blockquotes to markdown-style quoted text
+		// Slack supports > prefix for quotes (markdown-style)
+		$text = preg_replace_callback(
+			'/<blockquote[^>]*>(.*?)<\/blockquote>/is',
+			function( $matches ) {
+				$content = trim( $matches[1] );
+				// Strip inner HTML tags for cleaner quotes
+				$content = strip_tags( $content );
+				// Add > prefix to each line
+				$lines = explode( "\n", $content );
+				$quoted = array();
+				foreach ( $lines as $line ) {
+					$trimmed = trim( $line );
+					if ( $trimmed !== '' ) {
+						$quoted[] = '> ' . $trimmed;
+					}
+				}
+				return "\n" . implode( "\n", $quoted ) . "\n";
+			},
+			$text
+		);
+
+		// Convert horizontal rules to text separator
+		$text = preg_replace( '/<hr\s*\/?>/i', "\n───\n", $text );
+
+		// Note: We do NOT convert tables here - they're already properly handled
+		// by the excerpt generation with structure limiting and tag closing
 
 		return $text;
 	}

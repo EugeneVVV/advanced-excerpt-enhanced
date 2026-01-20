@@ -674,8 +674,9 @@ class Advanced_Excerpt {
 		// Ensure no broken/partial tags at the end of excerpt
 		$out = $this->cleanup_broken_tags( $out );
 
-		// Convert HTML lists and other unsupported tags to Slack-friendly format in RSS feeds
-		if ( is_feed() ) {
+		// Convert HTML lists and other unsupported tags to Slack-friendly format
+		// Only apply for Slack requests - other RSS readers handle HTML properly
+		if ( is_feed() && $this->is_slack_request() ) {
 			$out = $this->convert_lists_for_slack( $out );
 			$out = $this->convert_other_tags_for_slack( $out );
 		}
@@ -738,6 +739,22 @@ class Advanced_Excerpt {
 		$text = preg_replace( '/<([a-zA-Z0-9]+)(?:\s+[^>]*)?$/s', '', $text );
 
 		return $text;
+	}
+
+	/**
+	 * Check if the current request is from Slack RSS integration
+	 * Detects Slack-related User-Agent patterns
+	 *
+	 * @return bool True if request is from Slack
+	 */
+	function is_slack_request() {
+		$user_agent = isset( $_SERVER['HTTP_USER_AGENT'] ) ? $_SERVER['HTTP_USER_AGENT'] : '';
+
+		// Check for Slack-related User-Agent patterns
+		return (
+			stripos( $user_agent, 'slack' ) !== false ||
+			stripos( $user_agent, 'Slackbot' ) !== false
+		);
 	}
 
 	/**

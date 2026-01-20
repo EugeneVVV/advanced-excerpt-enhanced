@@ -798,11 +798,16 @@ class Advanced_Excerpt {
 
 					// Extract list items
 					$content = preg_replace_callback(
-						'/<li[^>]*>(.*?)<\/li>/is',
+						'/<li([^>]*)>(.*?)<\/li>/is',
 						function( $li_matches ) use ( $bullet, $indent ) {
-							$item_content = trim( strip_tags( $li_matches[1] ) );
+							$li_attrs = $li_matches[1];
+							$item_content = trim( strip_tags( $li_matches[2] ) );
 							// Add indentation to multi-line items
 							$item_content = str_replace( "\n", "\n" . $indent . '  ', $item_content );
+							// Skip bullet for ellipsis items (has excerpt-ellipsis class or list-style-type: none)
+							if ( strpos( $li_attrs, 'excerpt-ellipsis' ) !== false || strpos( $li_attrs, 'list-style-type: none' ) !== false ) {
+								return "\n" . $indent . '  ' . $item_content;
+							}
 							return "\n" . $indent . $bullet . ' ' . $item_content;
 						},
 						$content
@@ -823,26 +828,37 @@ class Advanced_Excerpt {
 					$current_depth = min( $depth, $max_depth - 1 );
 					$indent = str_repeat( '  ', $current_depth );
 
-					// Extract list items
-					preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $content, $items );
+					// Extract list items with their attributes
+					preg_match_all( '/<li([^>]*)>(.*?)<\/li>/is', $content, $items, PREG_SET_ORDER );
 					$result = '';
+					$item_number = 0;
 
-					foreach ( $items[1] as $index => $item ) {
-						$item_content = trim( strip_tags( $item ) );
+					foreach ( $items as $item ) {
+						$li_attrs = $item[1];
+						$item_content = trim( strip_tags( $item[2] ) );
+
+						// Skip marker for ellipsis items (has excerpt-ellipsis class or list-style-type: none)
+						if ( strpos( $li_attrs, 'excerpt-ellipsis' ) !== false || strpos( $li_attrs, 'list-style-type: none' ) !== false ) {
+							// Add indentation to multi-line items
+							$item_content = str_replace( "\n", "\n" . $indent . '   ', $item_content );
+							$result .= "\n" . $indent . '   ' . $item_content;
+							continue;
+						}
 
 						// Different numbering styles by depth
 						if ( $current_depth % 3 == 0 ) {
-							$marker = ( $index + 1 ) . '.';
+							$marker = ( $item_number + 1 ) . '.';
 						} elseif ( $current_depth % 3 == 1 ) {
-							$marker = chr( 97 + ( $index % 26 ) ) . ')';
+							$marker = chr( 97 + ( $item_number % 26 ) ) . ')';
 						} else {
 							$roman = array( 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x' );
-							$marker = ( isset( $roman[$index] ) ? $roman[$index] : ( $index + 1 ) ) . ')';
+							$marker = ( isset( $roman[$item_number] ) ? $roman[$item_number] : ( $item_number + 1 ) ) . ')';
 						}
 
 						// Add indentation to multi-line items
 						$item_content = str_replace( "\n", "\n" . $indent . '   ', $item_content );
 						$result .= "\n" . $indent . $marker . ' ' . $item_content;
+						$item_number++;
 					}
 
 					return $result . "\n";

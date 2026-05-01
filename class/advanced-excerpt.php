@@ -296,13 +296,6 @@ class Advanced_Excerpt {
 			}
 		}
 
-		// prevent recursion on 'the_content' hook
-		$content_has_filter = false;
-		if ( has_filter( 'the_content', array( $this, 'filter_content' ) ) ) { 
-			remove_filter( 'the_content', array( $this, 'filter_content' ) ); 
-			$content_has_filter = true;
-		}
-
 		$text = get_the_content( '' );
 
 		// Remove excerpt cut sections BEFORE any other processing
@@ -313,17 +306,28 @@ class Advanced_Excerpt {
 			$text = $post->post_excerpt;
 		}
 
-		// remove shortcodes
-		if ( $no_shortcode ) {
-			$text = strip_shortcodes( $text );
-		}
+		// Skip apply_filters('the_content') entirely — it invokes plugin hooks
+		// (do_shortcode, term queries, etc.) that exhaust memory on archive/search
+		// pages where excerpts are generated for many posts at once.
+		// Apply only the core WP formatting functions that are safe and cheap.
 
-		$text = apply_filters( 'the_content', $text );
+		// [excerpt_cut] and [excerpt_only] are already resolved by
+		// remove_excerpt_cut_sections() above. Execute only [advanced_excerpt_text]
+		// (the lang-filter shortcode) so its content is included/excluded correctly
+		// before strip_shortcodes() removes all remaining shortcode tags.
+		global $shortcode_tags;
+		$saved_shortcodes = $shortcode_tags;
+		$shortcode_tags    = array_intersect_key(
+			$shortcode_tags,
+			array( 'advanced_excerpt_text' => true )
+		);
+		$text           = do_shortcode($text);
+		$shortcode_tags = $saved_shortcodes;
 
-		// add our filter back in
-		if ( $content_has_filter ) { 
-            add_filter( 'the_content', array( $this, 'filter_content' ) );
-		}
+		$text = strip_shortcodes($text);
+		$text = wptexturize($text);
+		$text = wpautop($text);
+		$text = shortcode_unautop($text);
 
 		// From the default wp_trim_excerpt():
 		// Some kind of precaution against malformed CDATA in RSS feeds I suppose

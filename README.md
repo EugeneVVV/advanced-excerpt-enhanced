@@ -222,6 +222,10 @@ Control what appears in excerpts vs full posts:
 ## 📝 Changelog
 
 ### Version 4.4.2-fork
+**Bug Fixes:**
+- Fix OOM on archive/search pages: replaced `apply_filters('the_content')` with safe core formatting functions (`wptexturize`, `wpautop`, `shortcode_unautop`) to prevent plugin hooks (do_shortcode, WP_Term_Query, etc.) exhausting memory when generating excerpts for many posts at once
+- `[excerpt_cut]`, `[excerpt_only]`, and `[advanced_excerpt_text]` shortcodes continue to work correctly; all third-party shortcodes are stripped without executing
+
 **New Shortcodes:**
 - `[excerpt_cut]` with optional `text` parameter for replacement content in excerpts
 - `[excerpt_only]` with optional `text` parameter for replacement content in full posts

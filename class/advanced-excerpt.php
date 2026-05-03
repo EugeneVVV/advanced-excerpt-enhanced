@@ -309,7 +309,12 @@ class Advanced_Excerpt {
 		// Skip apply_filters('the_content') entirely — it invokes plugin hooks
 		// (do_shortcode, term queries, etc.) that exhaust memory on archive/search
 		// pages where excerpts are generated for many posts at once.
-		// Apply only the core WP formatting functions that are safe and cheap.
+		// Replicate only the core steps that are safe and necessary for excerpts.
+
+		// Priority 9 in the_content: render Gutenberg block markup into HTML first,
+		// so wpautop and the tokeniser see proper <ul>/<li> etc. rather than raw
+		// block comment markers (<!-- wp:list --> …) that break spacing and counts.
+		$text = do_blocks($text);
 
 		// [excerpt_cut] and [excerpt_only] are already resolved by
 		// remove_excerpt_cut_sections() above. Execute only [advanced_excerpt_text]

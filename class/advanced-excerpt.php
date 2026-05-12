@@ -311,10 +311,14 @@ class Advanced_Excerpt {
 		// pages where excerpts are generated for many posts at once.
 		// Replicate only the core steps that are safe and necessary for excerpts.
 
-		// Priority 9 in the_content: render Gutenberg block markup into HTML first,
-		// so wpautop and the tokeniser see proper <ul>/<li> etc. rather than raw
-		// block comment markers (<!-- wp:list --> …) that break spacing and counts.
-		$text = do_blocks($text);
+		// For Gutenberg content, extract inner HTML from blocks without executing
+		// render callbacks. do_blocks() triggers all block render_callbacks which
+		// can exhaust memory when generating excerpts for many posts on archive/search
+		// pages. Stripping block delimiter comments preserves the saved inner HTML
+		// (static blocks like paragraph/heading/list) while producing empty strings
+		// for dynamic blocks (acceptable in excerpt context). Classic editor content
+		// has no block delimiters so is unaffected.
+		$text = preg_replace( '/<!--\s*\/?wp:[^>]*-->/i', '', $text );
 
 		// [excerpt_cut] and [excerpt_only] are already resolved by
 		// remove_excerpt_cut_sections() above. Execute only [advanced_excerpt_text]

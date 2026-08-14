@@ -44,11 +44,20 @@ class Advanced_Excerpt {
 		'max_top_level_structures' => 0,
 		'skip_headers' => 0,
 		'rss_max_length' => 0,
+		'strip_links_slack' => 1,
+		'strip_empty_lines_slack' => 1,
 	);
 
 	public $options_basic_tags; // Basic HTML tags (determines which tags are in the checklist by default)
 	public $options_all_tags; // Almost all HTML tags (extra options)
 	public $filter_type; // Determines wether we're filtering the_content or the_excerpt at any given time
+
+	// HTML5 void elements: never need (or permit) a closing tag, even when
+	// written without a trailing "/>" (e.g. plain <hr>, as Gutenberg emits
+	// it). Shared by the main tag-balancing loop in text_excerpt() and the
+	// truncation logic in enforce_rss_max_length() so the two can't drift
+	// out of sync with each other again.
+	public $void_elements = array( 'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr' );
 
 	function __construct( $plugin_file_path ) {
 		$this->load_options();
@@ -61,6 +70,9 @@ class Advanced_Excerpt {
 		$this->plugin_base ='options-general.php?page=advanced-excerpt';
 
 		if ( isset($_SERVER['REQUEST_METHOD']) && 'POST' == $_SERVER['REQUEST_METHOD'] && isset( $_REQUEST['page'] ) && 'advanced-excerpt' === $_REQUEST['page'] ) {
+			if ( ! current_user_can( 'manage_options' ) ) {
+				wp_die( __( 'You do not have sufficient permissions to manage options for this site.', 'advanced-excerpt' ) );
+			}
 			check_admin_referer( 'advanced_excerpt_update_options' );
 			$this->update_options();
 		}
@@ -362,6 +374,14 @@ class Advanced_Excerpt {
 			$text = strip_tags( $text, $tag_string );
 		}
 
+		// Drop <a> tags that aren't a real, followable link, regardless of
+		// which Strip Tags mode is in use — applies to every excerpt (site
+		// display and RSS, standard or Slack alike). A no-op whenever "a"
+		// isn't allowed in the first place, since strip_tags() above (or the
+		// 'dont_remove_any' default) is what determines whether any <a> tags
+		// reach this point at all.
+		$text = $this->sanitize_anchor_tags( $text );
+
 		$text_before_trimming = $text;
 
 		// Create the excerpt
@@ -384,6 +404,77 @@ class Advanced_Excerpt {
 
 		return apply_filters( 'advanced_excerpt_content', $text );
 
+	}
+
+	/**
+	 * Removes <a> tags that aren't a real, followable link — no href at all
+	 * (e.g. a bare <a name="..."> in-page anchor), a same-page fragment
+	 * (meaningless once the content is lifted out of the full page into an
+	 * excerpt), or a non-navigable pseudo-scheme like javascript:/data:/
+	 * vbscript: that only works via script execution inside a browser.
+	 *
+	 * The wrapping <a> tag is unwrapped rather than removing its content —
+	 * the visible text (and any other formatting tags inside it) is kept, the
+	 * same way strip_tags() above already treats any other disallowed tag.
+	 * A genuine link's other attributes (target, rel, class, etc.) are left
+	 * untouched; this only judges whether the href itself is worth keeping.
+	 *
+	 * Runs for every excerpt — site display and RSS, standard or Slack alike
+	 * — independent of the Strip Tags setting: if "a" isn't in the allowed
+	 * tags list, strip_tags() has already removed every <a> tag before this
+	 * ever runs, so this is naturally a no-op in that case.
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Text with only real, navigable <a> tags kept
+	 */
+	function sanitize_anchor_tags( $text ) {
+		return preg_replace_callback(
+			'/<a\s+([^>]*)>(.*?)<\/a>/is',
+			function( $matches ) {
+				$attrs = $matches[1];
+				$inner = $matches[2];
+
+				if ( ! preg_match( '/href\s*=\s*["\']([^"\']*)["\']/i', $attrs, $href_match ) ) {
+					// No href at all - not a real link.
+					return $inner;
+				}
+
+				$href = trim( $href_match[1] );
+
+				if ( '' === $href || '#' === substr( $href, 0, 1 ) ) {
+					// Empty, or a same-page fragment.
+					return $inner;
+				}
+
+				if ( preg_match( '/^\s*(?:javascript|data|vbscript)\s*:/i', $href ) ) {
+					// Not a real destination outside a browser executing script.
+					return $inner;
+				}
+
+				return $matches[0];
+			},
+			$text
+		);
+	}
+
+	/**
+	 * Remove the innermost (last) occurrence of $tag_name from a tag stack,
+	 * mirroring how a real HTML parser matches a closing tag to its nearest
+	 * unclosed opener. Shared by every closing-tag case in text_excerpt()'s
+	 * tokenizer loop and by enforce_rss_max_length()'s own tag-balancing
+	 * pass, so the same LIFO-matching behavior can't drift out of sync
+	 * between the two places that need it.
+	 *
+	 * @param array  $tag_stack Tag stack, passed by reference
+	 * @param string $tag_name  Tag name to remove the last occurrence of
+	 */
+	function remove_from_tag_stack( array &$tag_stack, $tag_name ) {
+		for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
+			if ( $tag_stack[$i] == $tag_name ) {
+				array_splice( $tag_stack, $i, 1 );
+				break;
+			}
+		}
 	}
 
 	function text_excerpt( $text, $length, $length_type, $finish ) {
@@ -409,8 +500,20 @@ class Advanced_Excerpt {
 		$skip_headers = isset( $this->options['skip_headers'] ) ? (int) $this->options['skip_headers'] : 0;
 		$list_ellipsis = isset( $this->options['list_ellipsis'] ) ? $this->options['list_ellipsis'] : '';
 
-		// Divide the string into tokens; HTML tags, or words, followed by any whitespace
-		preg_match_all( '/(<[^>]+>|[^<>\s]+)\s*/u', $text, $tokens );
+		// Divide the string into tokens; HTML tags, or words, followed by any whitespace.
+		// The tag alternative requires a letter/digit immediately after "<" (or "</"),
+		// same as the tag-name shape checked below and in strip_recognized_tags_only().
+		// Without that requirement, a bare "<" in plain text (e.g. "Value < $50") would
+		// still match "<[^>]+>" by greedily running forward to the *next* literal ">" in
+		// the string - which can belong to a real tag further along (like a following
+		// </a>) - swallowing that real closing tag into what looks like one bogus token.
+		// Since the tag-name regex below isn't anchored to the token's start, it could
+		// then find that swallowed "</a>" shape inside the blob and misidentify the
+		// whole thing as an opening <a>, leaving a stray, unmatched closing tag stacked
+		// up for the real one and duplicate "</a>" fragments auto-appended at the end.
+		// A lone "<" or ">" that isn't part of a tag-shaped token falls to the final
+		// alternative and is kept as a single literal character instead.
+		preg_match_all( '/(<\/?[a-zA-Z0-9]+(?:\s[^<>]*)?\/?>|[^<>\s]+|[<>])\s*/u', $text, $tokens );
 
 		foreach ( $tokens[0] as $t ) {
 			// Check if we've reached limits
@@ -424,7 +527,21 @@ class Advanced_Excerpt {
 			}
 
 			if ( $t[0] == '<' ) { // Token is a tag
-				// In block finish mode, check for br or block tags (opening or closing)
+				// Only a genuine, recognized HTML tag name is treated as
+				// real markup for tag-balancing/tracking purposes below.
+				// Casual bracket notation in plain text (e.g. "<Free>",
+				// "<New>") matches this token's shape too — a letter
+				// immediately after "<" — but isn't real markup. Treating
+				// it as an opening tag needing a closing counterpart used
+				// to invent an invalid closing tag (e.g. "</free>") at the
+				// end of the excerpt and silently swallow the bracketed
+				// word along the way. $this->options_all_tags is the same
+				// allowed-tags list already used elsewhere, so an
+				// unrecognized name here is never mistaken for a real tag.
+				$has_tag_shaped_name = preg_match( '/<\/?([a-zA-Z0-9]+)/', $t, $tag_match );
+				$is_recognized_tag = $has_tag_shaped_name && in_array( strtolower( $tag_match[1] ), (array) $this->options_all_tags );
+
+				// In block finish mode, check for br, block tags, or the end of an inline element
 				if ( $looking_for_block_end ) {
 					// Check for <br> tag
 					if ( preg_match( '/<br\s*\/?>/i', $t ) ) {
@@ -432,21 +549,50 @@ class Advanced_Excerpt {
 						break;
 					}
 
-					// Check for block-level tags (both opening and closing)
+					// Block-level tags stop the excerpt whether they're opening or closing
+					// (an opening tag here means a new block is starting, so this is also
+					// a safe place to stop). Inline tags (a, strong, em, etc.) only stop the
+					// excerpt once they're fully closed, so we never cut their content short
+					// (e.g. a link's visible text) or leave a run of inline elements
+					// unbounded while waiting for a distant block boundary.
 					$block_tags = array( 'p', 'div', 'blockquote', 'li', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section', 'header', 'footer', 'aside', 'nav', 'ul', 'ol', 'table', 'tr', 'pre', 'form', 'fieldset', 'dl', 'dt', 'dd', 'hr', 'figure', 'figcaption', 'main', 'address', 'details', 'summary', 'dialog' );
-					if ( preg_match( '/<\/?([a-zA-Z0-9]+)/', $t, $tag_match ) ) {
+					$inline_stop_tags = array( 'a', 'strong', 'b', 'em', 'i', 'span', 'code', 'mark', 'small', 'sub', 'sup', 'u', 's', 'abbr', 'cite', 'q' );
+
+					if ( $is_recognized_tag ) {
 						$block_tag = strtolower( $tag_match[1] );
+						$is_closing_tag = ( strpos( $t, '</' ) === 0 );
+						$is_self_closing_tag = ( strpos( $t, '/>' ) !== false );
+
 						if ( in_array( $block_tag, $block_tags ) ) {
+							// Keep the tag stack in sync so the end-of-loop cleanup doesn't
+							// also try to close it (if it's a closing tag) or leave it
+							// permanently unclosed (if it's a fresh opening tag).
+							if ( $is_closing_tag ) {
+								$this->remove_from_tag_stack( $tag_stack, $block_tag );
+							} elseif ( ! $is_self_closing_tag && $block_tag != 'hr' ) {
+								array_push( $tag_stack, $block_tag );
+							}
+							$out .= $t;
+							break;
+						}
+
+						if ( $is_closing_tag && in_array( $block_tag, $inline_stop_tags ) ) {
+							$this->remove_from_tag_stack( $tag_stack, $block_tag );
 							$out .= $t;
 							break;
 						}
 					}
 				}
 				// Parse tag name
-				if ( preg_match( '/<\/?([a-zA-Z0-9]+)/', $t, $tag_match ) ) {
+				if ( $is_recognized_tag ) {
 					$tag_name = strtolower( $tag_match[1] );
 					$is_closing = ( strpos( $t, '</' ) === 0 );
-					$is_self_closing = ( strpos( $t, '/>' ) !== false );
+					// HTML5 void elements (br, hr, img, etc.) never need a
+					// closing tag even when written without a trailing "/>"
+					// (e.g. plain <hr>, as Gutenberg emits it) — without this,
+					// they get pushed onto the tag stack like a normal
+					// element and later auto-closed with an invalid </hr>.
+					$is_self_closing = ( strpos( $t, '/>' ) !== false || in_array( $tag_name, $this->void_elements ) );
 
 					// Handle header tags
 					if ( in_array( $tag_name, array( 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ) ) ) {
@@ -480,13 +626,7 @@ class Advanced_Excerpt {
 					if ( in_array( $tag_name, array( 'ul', 'ol' ) ) && $is_closing ) {
 						if ( ! empty( $list_stack ) && end( $list_stack ) == $tag_name ) {
 							array_pop( $list_stack );
-							// Remove from tag stack
-							for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-								if ( $tag_stack[$i] == $tag_name ) {
-									array_splice( $tag_stack, $i, 1 );
-									break;
-								}
-							}
+							$this->remove_from_tag_stack( $tag_stack, $tag_name );
 						}
 						$out .= $t;
 						continue;
@@ -514,13 +654,7 @@ class Advanced_Excerpt {
 							}
 							array_push( $tag_stack, 'li' );
 						} else {
-							// Remove last 'li' from tag stack
-							for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-								if ( $tag_stack[$i] == 'li' ) {
-									array_splice( $tag_stack, $i, 1 );
-									break;
-								}
-							}
+							$this->remove_from_tag_stack( $tag_stack, 'li' );
 						}
 						$out .= $t;
 						continue;
@@ -543,13 +677,7 @@ class Advanced_Excerpt {
 					// Handle table end
 					if ( $tag_name == 'table' && $is_closing ) {
 						$in_table = false;
-						// Remove from tag stack
-						for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-							if ( $tag_stack[$i] == 'table' ) {
-								array_splice( $tag_stack, $i, 1 );
-								break;
-							}
-						}
+						$this->remove_from_tag_stack( $tag_stack, 'table' );
 						$out .= $t;
 						continue;
 					}
@@ -565,46 +693,20 @@ class Advanced_Excerpt {
 							}
 							array_push( $tag_stack, 'tr' );
 						} else {
-							// Remove last 'tr' from tag stack
-							for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-								if ( $tag_stack[$i] == 'tr' ) {
-									array_splice( $tag_stack, $i, 1 );
-									break;
-								}
-							}
+							$this->remove_from_tag_stack( $tag_stack, 'tr' );
 						}
 						$out .= $t;
 						continue;
 					}
 
-					// Handle other table elements (td, th, tbody, thead, tfoot)
-					if ( in_array( $tag_name, array( 'td', 'th', 'tbody', 'thead', 'tfoot' ) ) ) {
-						if ( ! $is_closing && ! $is_self_closing ) {
-							array_push( $tag_stack, $tag_name );
-						} elseif ( $is_closing ) {
-							// Remove last matching tag from stack
-							for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-								if ( $tag_stack[$i] == $tag_name ) {
-									array_splice( $tag_stack, $i, 1 );
-									break;
-								}
-							}
-						}
-						$out .= $t;
-						continue;
-					}
-
-					// Handle other regular tags
+					// Handle all other tags, including the remaining table
+					// elements (td, th, tbody, thead, tfoot) — no special
+					// casing needed for those; they just push/pop like any
+					// other non-void element.
 					if ( ! $is_closing && ! $is_self_closing ) {
 						array_push( $tag_stack, $tag_name );
 					} elseif ( $is_closing ) {
-						// Remove last matching tag from stack
-						for ( $i = count( $tag_stack ) - 1; $i >= 0; $i-- ) {
-							if ( $tag_stack[$i] == $tag_name ) {
-								array_splice( $tag_stack, $i, 1 );
-								break;
-							}
-						}
+						$this->remove_from_tag_stack( $tag_stack, $tag_name );
 					}
 				}
 
@@ -681,6 +783,19 @@ class Advanced_Excerpt {
 			$out .= '</' . $tag . '>';
 		}
 
+		// Remove header tags left completely empty by the Skip Headers option
+		// (it removes the header's text but, by design, keeps the tag pair
+		// itself so heading structure/formatting is preserved). An empty
+		// heading is invisible on the website either way, but leaving the
+		// tag pair in place blocks the newline runs Gutenberg puts between
+		// blocks from merging into one, so they can't be collapsed down to a
+		// single blank line below — and Slack appears to render the empty
+		// tag as a block of its own, stacking extra visible blank lines
+		// around it. Removing the tag entirely merges those runs so the
+		// collapse in convert_lists_for_slack() (or whatever the destination
+		// otherwise does with runs of whitespace) sees one gap, not two.
+		$out = preg_replace( '/<h[1-6][^>]*>\s*<\/h[1-6]>/i', '', $out );
+
 		// Clean up multiple line breaks and unnecessary br tags
 		$out = $this->cleanup_line_breaks( $out );
 
@@ -690,8 +805,70 @@ class Advanced_Excerpt {
 		// Convert HTML lists and other unsupported tags to Slack-friendly format
 		// Only apply for Slack requests - other RSS readers handle HTML properly
 		if ( is_feed() && $this->is_slack_request() ) {
+			// Slack has no HTML support at all - a <br> that reached it as a
+			// literal tag would show up as visible "<br>" text, not a line
+			// break. Not optional, unlike the settings below: this converts
+			// any <br> that survived cleanup_line_breaks() into a real
+			// newline, before anything else (list/tag conversion below)
+			// would otherwise just delete the tag outright via
+			// strip_recognized_tags_only() and silently lose the line break.
+			$out = $this->convert_br_to_newline_for_slack( $out );
+
+			// Gutenberg occasionally fragments a single link into two (or
+			// more) adjacent <a> tags sharing the same href but splitting
+			// its visible text mid-word - a known editor artifact, not
+			// something a post author intends. Left alone, each fragment
+			// becomes its own separate link, visibly breaking the text
+			// apart. Merging them back into one logical link here applies
+			// equally to both branches below (native mrkdwn links and
+			// Strip Links), since both would otherwise show the same split.
+			$out = $this->merge_adjacent_same_href_links( $out );
+
+			$strip_links_slack = ! empty( $this->options['strip_links_slack'] );
+
+			if ( $strip_links_slack ) {
+				// Discard every <a> entirely (visible text only, no href) even
+				// if "a" is otherwise allowed by the Strip Tags setting - this
+				// is a Slack-specific override, independent of that setting.
+				$out = $this->strip_links_for_slack( $out );
+			} else {
+				// Protect <a href="..."> links with angle-bracket-free placeholders first,
+				// since both the list and other-tag conversions below use strip_tags() on
+				// their content and would otherwise silently discard the href along with
+				// the rest of the markup.
+				$out = $this->protect_links_for_slack( $out );
+			}
+
 			$out = $this->convert_lists_for_slack( $out );
 			$out = $this->convert_other_tags_for_slack( $out );
+
+			if ( $strip_links_slack ) {
+				// Every <a> is already gone, but the visible text (or plain
+				// text elsewhere in the post) can still contain a bare URL
+				// that Slack would auto-link (and unfurl) on its own -
+				// disrupt anything URL-shaped so it no longer reads as a
+				// link to Slack's own auto-detection either.
+				$out = $this->disable_url_autolink_for_slack( $out );
+			} else {
+				$out = $this->restore_links_for_slack( $out );
+			}
+
+			// Collapse every remaining blank-line gap down to a single
+			// newline. Gutenberg's own block markup routinely leaves blank
+			// lines between paragraphs/headings (and the blockquote and <hr>
+			// conversions above add their own leading/trailing newline the
+			// same way list conversion used to), so without this, ordinary
+			// multi-paragraph posts still carry a blank line between every
+			// block even though nothing in this pipeline needs one anymore.
+			// Runs last, after every conversion that could introduce a gap.
+			// Optional (off by default): blank-line spacing *within* a list
+			// (between sibling items, and between an item's own text and a
+			// nested sublist) is a separate, always-on cleanup handled
+			// unconditionally inside convert_nested_lists() above - this
+			// setting only controls spacing *between* top-level blocks.
+			if ( ! empty( $this->options['strip_empty_lines_slack'] ) ) {
+				$out = preg_replace( '/\n{2,}/', "\n", $out );
+			}
 		}
 
 		// Enforce RSS max length if in feed and limit is set
@@ -703,16 +880,14 @@ class Advanced_Excerpt {
 	}
 
 	function cleanup_line_breaks( $text ) {
-		$is_feed = is_feed();
-
-		if ( $is_feed ) {
-			// In RSS feeds: remove ALL <br> tags for better readability
-			// Block-level tags provide sufficient spacing in feed readers
-			$text = preg_replace( '/<br\s*\/?>/i', '', $text );
-		} else {
-			// In regular excerpts: keep max 1 consecutive <br>
-			$text = preg_replace( '/<br\s*\/?>\s*(?:<br\s*\/?>\s*)+/i', '<br />', $text );
-		}
+		// Collapse a run of consecutive <br> tags down to one - a single
+		// <br> is valid, meaningful markup that any HTML-capable RSS reader
+		// renders fine, so there's no reason to strip it just because this
+		// is a feed. Slack is the one consumer that can't render a <br> as
+		// anything but literal visible text; that's handled separately,
+		// downstream, by convert_br_to_newline_for_slack() converting any
+		// surviving <br> into a real newline before Slack ever sees it.
+		$text = preg_replace( '/<br\s*\/?>\s*(?:<br\s*\/?>\s*)+/i', '<br />', $text );
 
 		// Remove <br> that appears right before block-level closing tags
 		$block_tags = array( 'p', 'div', 'blockquote', 'li', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section', 'header', 'footer', 'aside', 'nav' );
@@ -755,6 +930,290 @@ class Advanced_Excerpt {
 	}
 
 	/**
+	 * Escapes literal "<" and ">" occurring naturally in plain text (always
+	 * called after strip_tags() has already reduced content to text only)
+	 * before it reaches Slack. Slack's own message documentation requires
+	 * these to be escaped in constructed message text: "<" and ">" delimit
+	 * every one of its special references — not just the <url|text> link
+	 * syntax already handled by protect_links_for_slack()/
+	 * restore_links_for_slack(), but channel mentions (<#channel>), user
+	 * mentions (<@user>), and commands like <!here> — so a stray literal
+	 * one in ordinary text risks being mistaken for an attempted reference.
+	 *
+	 * A bare "&" does NOT need the same treatment here: WordPress core's
+	 * own convert_chars() (registered on the_excerpt_rss, downstream of
+	 * this entire pipeline) already escapes any bare "&" not already part
+	 * of a real entity, unconditionally, on every request this method's
+	 * output ever reaches - re-doing that here would just be redundant.
+	 * (Confirmed against WordPress core source, not assumed.)
+	 *
+	 * @param string $text Plain text, already stripped of HTML tags
+	 * @return string Text with stray <, > escaped
+	 */
+	function escape_stray_chars_for_slack( $text ) {
+		return str_replace( array( '<', '>' ), array( '&lt;', '&gt;' ), $text );
+	}
+
+	/**
+	 * A strip_tags() replacement, used when reducing content to plain text
+	 * for Slack, that only removes genuinely recognized HTML tags (checked
+	 * against $this->options_all_tags, the same allowed-tags list used
+	 * elsewhere in the plugin) — leaving casual bracket notation that merely
+	 * looks tag-shaped (e.g. "<Free>", "<New>") as literal text instead of
+	 * silently discarding it. PHP's own strip_tags() can't make this
+	 * distinction: it removes anything shaped like "<...>" unconditionally,
+	 * bracketed word and all, the same blind spot text_excerpt()'s own
+	 * tag-balancing loop had before it started checking tag names the same
+	 * way.
+	 *
+	 * @param string $text Text potentially containing HTML tags
+	 * @return string Text with only recognized tags removed
+	 */
+	function strip_recognized_tags_only( $text ) {
+		return preg_replace_callback(
+			'/<\/?([a-zA-Z0-9]+)(?:\s[^>]*)?\/?>/',
+			function( $matches ) {
+				if ( in_array( strtolower( $matches[1] ), (array) $this->options_all_tags ) ) {
+					return ''; // A genuine tag - remove it, same as strip_tags().
+				}
+				return $matches[0]; // Not a real tag name - keep it as literal text.
+			},
+			$text
+		);
+	}
+
+	/**
+	 * Temporarily encode <a href="URL">Text</a> anchors as angle-bracket-free
+	 * placeholders so the strip_tags() calls used later when converting lists,
+	 * blockquotes, etc. to Slack-friendly plain text don't silently discard the
+	 * href along with the rest of the markup. Pair with restore_links_for_slack(),
+	 * which must run after all of that conversion has completed.
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Text with <a> tags replaced by placeholders
+	 */
+	function protect_links_for_slack( $text ) {
+		return preg_replace_callback(
+			'/<a\s+[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)<\/a>/is',
+			function( $matches ) {
+				$url = trim( $matches[1] );
+				$link_text = trim( $this->strip_recognized_tags_only( $matches[2] ) );
+				$link_text = $this->escape_stray_chars_for_slack( $link_text );
+
+				// A literal "|" occurring naturally in link text still needs
+				// replacing even though we emit a plain <a href> tag, not
+				// Slack's own <url|text> mrkdwn syntax. Slack's RSS app
+				// converts incoming HTML to its own mrkdwn internally before
+				// rendering it, and that internal conversion uses "|" as its
+				// link delimiter — confirmed via a live example where the
+				// first link whose text contained "|" is exactly where
+				// Slack's RSS app started rendering raw, truncated markup
+				// instead of the clean link every pipe-free one before it
+				// got. Swapping it for a slash keeps the visual separation
+				// the source intended without the character Slack's own
+				// converter treats as special.
+				$link_text = str_replace( '|', '/', $link_text );
+
+				// No javascript:/data:/vbscript: check needed here:
+				// sanitize_anchor_tags() already unwraps any <a> with such an
+				// href (and any other non-navigable one) before filter() ever
+				// calls text_excerpt() — the only caller of this method — so
+				// by the time an <a> tag reaches this function, its href is
+				// already known to be a real, followable destination.
+				if ( '' === $url || '' === $link_text ) {
+					// Nothing visible to show: an <a> with no text renders as
+					// nothing on the site itself, so drop it rather than
+					// surface a bare, unexplained URL in its place.
+					return $link_text;
+				}
+
+				return "\x01" . $url . "\x02" . $link_text . "\x03";
+			},
+			$text
+		);
+	}
+
+	/**
+	 * Converts the placeholders created by protect_links_for_slack() into a
+	 * minimal <a href="URL">Text</a> tag — real HTML, not Slack's <URL|Text>
+	 * mrkdwn syntax.
+	 *
+	 * That mrkdwn syntax was tried, including a fix that made the raw pipe
+	 * byte survive WordPress's own the_excerpt_rss filter chain intact
+	 * (confirmed against WordPress core source, not just live testing) -
+	 * but live Slack output still showed bullets rendering as empty, with
+	 * nothing after them, for cleanly-formed links with no syntax issues at
+	 * all. Surviving WordPress's filters only proves the bytes reaching
+	 * Slack were correct; it never confirmed the RSS app's own renderer
+	 * actually treats <url|text> as a link the way Slack's chat API does -
+	 * and the live evidence suggests it may not, reliably.
+	 *
+	 * This tag is deliberately stripped down to nothing but href — no
+	 * target/rel/data-* attributes. Those extras are what caused the
+	 * original bug this whole pipeline exists to fix: complex <a> tags
+	 * leaking through as raw, unparsed visible text. Since Slack already
+	 * renders this plugin's <p> tags correctly (paragraph breaks, not
+	 * literal text), a minimal, attribute-free <a> tag gets recognized by
+	 * that same native HTML handling instead of falling back to raw text —
+	 * confirmed against real Slack output.
+	 *
+	 * Even a clean, minimal <a> tag still gives Slack's RSS app a URL it
+	 * may try to unfurl into a preview card, and we've occasionally seen
+	 * posts render with broken/truncated text alongside what looks like an
+	 * unclosed <a - almost certainly Slack's own unfurl attempt going
+	 * wrong on its end, not malformed markup reaching it (this pipeline's
+	 * output has been directly verified byte-correct up to this point).
+	 * The only way to rule that failure mode out entirely is to not send a
+	 * link at all - i.e. the "Strip Links from Slack Feeds" option (see
+	 * strip_links_for_slack()), which is why that option defaults to on.
+	 *
+	 * @param string $text Text with link placeholders
+	 * @return string Text with minimal <a href> hyperlinks
+	 */
+	function restore_links_for_slack( $text ) {
+		return preg_replace_callback(
+			'/\x01(.*?)\x02(.*?)\x03/s',
+			function( $matches ) {
+				$url = $matches[1];
+				$link_text = $matches[2];
+				return '<a href="' . $url . '">' . $link_text . '</a>';
+			},
+			$text
+		);
+	}
+
+	/**
+	 * Discards every <a href="...">Text</a> entirely, keeping only the
+	 * visible text - no href, no placeholder, no restore step needed. Used
+	 * instead of protect_links_for_slack() when the "Strip Links from Slack
+	 * feeds" option is enabled, so links are removed from Slack output even
+	 * when "a" is otherwise allowed by the Strip Tags setting for web/
+	 * standard-RSS display - a Slack-specific override, independent of that
+	 * setting.
+	 *
+	 * This is the only way to fully rule out Slack's RSS app attempting to
+	 * unfurl a link into a preview card - a process we suspect is behind
+	 * the occasional broken/truncated post text with what looks like an
+	 * unclosed <a we've seen live even when a clean <a href> tag was sent
+	 * (see restore_links_for_slack()). With no URL in the feed at all,
+	 * there is nothing left for Slack to unfurl.
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Text with every <a> tag unwrapped to its visible text
+	 */
+	function strip_links_for_slack( $text ) {
+		return preg_replace_callback(
+			'/<a\s+[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)<\/a>/is',
+			function( $matches ) {
+				$link_text = trim( $this->strip_recognized_tags_only( $matches[2] ) );
+				return $this->escape_stray_chars_for_slack( $link_text );
+			},
+			$text
+		);
+	}
+
+	/**
+	 * Defeats Slack's own auto-link detection on anything URL-shaped, by
+	 * inserting an invisible U+2060 WORD JOINER at each structural point
+	 * (right after the scheme, and after every "." between domain labels)
+	 * that a URL-matching regex relies on being contiguous. The text still
+	 * reads identically to a human eye - Word Joiner has zero width and
+	 * isn't rendered - and if literally copy-pasted, most URL/domain
+	 * parsers treat it as invisible formatting rather than a literal
+	 * character, unlike a visible character (e.g. a backtick) which would
+	 * actually corrupt a pasted URL. Covers both full URLs (with an
+	 * http(s):// scheme) and bare domain-looking text without one (e.g.
+	 * "example.com/path"), since Slack auto-links both. Only scans plain
+	 * text between HTML tags, never inside a tag's own attributes, so it
+	 * can't corrupt markup that's still present (e.g. a kept <img src="...">).
+	 *
+	 * Paired with strip_links_for_slack(): once every <a> is gone, the
+	 * visible text left behind (e.g. a link whose text was itself a bare
+	 * domain) - or a URL that was never wrapped in a link to begin with -
+	 * can still look like something worth auto-linking to Slack. If links
+	 * are being suppressed on purpose, auto-linking should be too.
+	 *
+	 * @param string $text Text with any remaining HTML tags
+	 * @return string Text with URL-shaped substrings no longer link-shaped
+	 */
+	function disable_url_autolink_for_slack( $text ) {
+		// No trailing \b: \S+ and the optional path group already stop
+		// correctly at whitespace on their own, and a trailing \b would
+		// backtrack away from a URL ending in "/" or another non-word
+		// character (no word/non-word transition exists right after it),
+		// silently dropping it from the match.
+		$url_pattern = '/\b(?:https?:\/\/\S+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?:\/[^\s<>`]*)?)/i';
+		$word_joiner = "\xE2\x81\xA0"; // U+2060 WORD JOINER
+
+		$segments = preg_split( '/(<[^>]*>)/', $text, -1, PREG_SPLIT_DELIM_CAPTURE );
+		foreach ( $segments as &$segment ) {
+			if ( isset( $segment[0] ) && '<' === $segment[0] ) {
+				continue; // A tag - leave its attributes untouched.
+			}
+			$segment = preg_replace_callback(
+				$url_pattern,
+				function( $matches ) use ( $word_joiner ) {
+					$url = $matches[0];
+					// Break right after the scheme, if present.
+					$url = preg_replace( '/^(https?:\/\/)/i', '$1' . $word_joiner, $url );
+					// Break every domain-label boundary - the "word.word"
+					// shape essentially every URL-detection regex relies on.
+					return str_replace( '.', '.' . $word_joiner, $url );
+				},
+				$segment
+			);
+		}
+		unset( $segment );
+
+		return implode( '', $segments );
+	}
+
+	/**
+	 * Converts every <br> into a real newline character. Slack has no HTML
+	 * support at all - a literal <br> tag left in the text would render as
+	 * visible "<br>" text, not a line break - so this always runs (it's not
+	 * a setting; there's no reasonable case for leaving a raw <br> in
+	 * Slack's output). Runs before any tag-stripping/conversion below,
+	 * since strip_recognized_tags_only() treats "br" as a recognized tag
+	 * and would otherwise just delete it outright, losing the line break
+	 * instead of preserving it.
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Text with every <br> replaced by "\n"
+	 */
+	function convert_br_to_newline_for_slack( $text ) {
+		return preg_replace( '/<br\s*\/?>/i', "\n", $text );
+	}
+
+	/**
+	 * Merges adjacent <a> tags that share the same href into one - a real,
+	 * observed Gutenberg RichText editor artifact where a single intended
+	 * link ends up serialized as two (or more) consecutive tags with
+	 * identical hrefs, splitting the visible text mid-word (e.g. "Direct
+	 * link to o</a><a href="same URL">ffer</a>"). Left alone, each fragment
+	 * becomes its own separate link downstream, visibly breaking the text
+	 * apart instead of reading as one link. Runs once for every adjacent
+	 * pair per pass, repeating until no more merges happen, so three or
+	 * more fragments collapse into one just as well as two.
+	 *
+	 * @param string $text Text with HTML
+	 * @return string Text with adjacent same-href <a> tags merged into one
+	 */
+	function merge_adjacent_same_href_links( $text ) {
+		do {
+			$text = preg_replace(
+				'/(<a\s+[^>]*href=["\']([^"\']*)["\'][^>]*>)(.*?)<\/a>\s*<a\s+[^>]*href=["\']\2["\'][^>]*>(.*?)<\/a>/is',
+				'$1$3$4</a>',
+				$text,
+				-1,
+				$count
+			);
+		} while ( $count > 0 );
+
+		return $text;
+	}
+
+	/**
 	 * Check if the current request is from Slack RSS integration
 	 * Detects Slack-related User-Agent patterns
 	 *
@@ -779,24 +1238,65 @@ class Advanced_Excerpt {
 	 * @return string Text with lists converted to Slack-friendly format
 	 */
 	function convert_lists_for_slack( $text ) {
-		// Process lists recursively to handle nesting properly
-		$text = $this->convert_nested_lists( $text, 0 );
-
-		// Clean up excessive newlines that might result from list conversion
-		$text = preg_replace( '/\n{3,}/', "\n\n", $text );
-
-		return $text;
+		// Process lists recursively to handle nesting properly. Any excess
+		// newlines this leaves behind are cleaned up later — this method has
+		// exactly one caller, and that caller collapses every remaining
+		// blank-line gap to a single newline once all Slack conversions
+		// (this one included) have finished, so doing it again here would
+		// just be redundant.
+		return $this->convert_nested_lists( $text );
 	}
 
 	/**
-	 * Convert nested lists iteratively from innermost to outermost
-	 * Prevents infinite recursion and memory issues
+	 * Count net open <ul>/<ol> tags before $offset in $text, i.e. this list's
+	 * actual nesting depth at that position. Used instead of a fixed depth
+	 * parameter so indentation and bullet/numbering style genuinely vary
+	 * with real nesting depth — see the note in convert_nested_lists() for
+	 * why a parameter alone can't express this.
+	 *
+	 * Pass $tag ('ul' or 'ol') to count only that tag's own ancestors,
+	 * ignoring the other type entirely - used for bullet/numbering STYLE
+	 * selection, so a <ul> nested inside an <ol> nested inside a <ul> is
+	 * one level of <ul> nesting for style purposes (the same style as if
+	 * the <ol> weren't there), even though it's two levels deep overall.
+	 * Leave $tag null (the default) to count both types together - used for
+	 * indentation, which should reflect total structural depth regardless
+	 * of type mixing.
+	 *
+	 * @param string      $text   Text being scanned (the current iteration's state)
+	 * @param int         $offset Byte offset of the match start within $text
+	 * @param string|null $tag    'ul', 'ol', or null for both types combined
+	 * @return int Nesting depth (0 = top level)
+	 */
+	function list_nesting_depth_at( $text, $offset, $tag = null ) {
+		$before = substr( $text, 0, $offset );
+		$tag_pattern = $tag ? preg_quote( $tag, '/' ) : '[uo]l';
+		$opens = preg_match_all( '/<' . $tag_pattern . '[^>]*>/i', $before );
+		$closes = preg_match_all( '/<\/' . $tag_pattern . '>/i', $before );
+		return max( $opens - $closes, 0 );
+	}
+
+	/**
+	 * Convert nested lists iteratively from innermost to outermost.
+	 * Prevents infinite recursion and memory issues.
+	 *
+	 * Bullet/numbering style depends on each list's real nesting depth,
+	 * computed per match via list_nesting_depth_at() rather than a depth
+	 * parameter threaded through recursive calls - this function never
+	 * actually recurses (that's the whole point of processing innermost-
+	 * first in a loop), so a fixed parameter passed in from the one caller
+	 * could never reflect a specific match's true position in the document;
+	 * every match would always compute the same depth. Because inner lists
+	 * are converted to plain text before outer ones are ever matched, the
+	 * open/close count in the *current* iteration's text - not the original
+	 * input - is always exactly the count of list levels still enclosing
+	 * that match, giving the right answer without tracking a depth counter
+	 * explicitly across iterations.
 	 *
 	 * @param string $text Text containing lists
-	 * @param int $depth Starting depth (0-based)
 	 * @return string Converted text
 	 */
-	function convert_nested_lists( $text, $depth = 0 ) {
+	function convert_nested_lists( $text ) {
 		// Bullet styles by depth (like browsers): • ◦ ▪ ▫
 		// Using U+2022 (•), U+25E6 (◦), U+25AA (▪), U+25AB (▫) for consistent sizing
 		$bullet_styles = array( '•', '◦', '▪', '▫' );
@@ -814,24 +1314,44 @@ class Advanced_Excerpt {
 
 			// Find the deepest lists first (those without nested lists)
 			// Match lists that don't contain other list tags
+			$scan_text = $text;
 			$text = preg_replace_callback(
 				'/<ul[^>]*>(?:(?!<ul|<ol).)*?<\/ul>/is',
-				function( $matches ) use ( $bullet_styles, $depth, $max_depth ) {
-					// Calculate depth based on how many levels deep we are
-					// Count preceding list markers to estimate depth
-					$content = $matches[0];
-					$current_depth = min( $depth, $max_depth - 1 );
+				function( $matches ) use ( $bullet_styles, $max_depth, $scan_text ) {
+					$content = $matches[0][0];
+					$offset = $matches[0][1];
+					// Indentation reflects total depth (any list type);
+					// bullet style reflects only <ul>-ancestor depth, so an
+					// <ol> in between doesn't skip this list ahead a style.
+					$indent_depth = min( $this->list_nesting_depth_at( $scan_text, $offset ), $max_depth - 1 );
+					$style_depth = min( $this->list_nesting_depth_at( $scan_text, $offset, 'ul' ), $max_depth - 1 );
 
 					// Get bullet style for current depth
-					$bullet = $bullet_styles[ $current_depth % count( $bullet_styles ) ];
-					$indent = str_repeat( '  ', $current_depth );
+					$bullet = $bullet_styles[ $style_depth % count( $bullet_styles ) ];
+					$indent = str_repeat( '  ', $indent_depth );
+
+					// Gutenberg-authored lists commonly serialize with blank
+					// lines between </li> and the next <li>; collapse that
+					// gap now so it doesn't turn into a blank line between
+					// bullets below.
+					$content = preg_replace( '/<\/li>\s*<li/i', '</li><li', $content );
 
 					// Extract list items
 					$content = preg_replace_callback(
 						'/<li([^>]*)>(.*?)<\/li>/is',
 						function( $li_matches ) use ( $bullet, $indent ) {
 							$li_attrs = $li_matches[1];
-							$item_content = trim( strip_tags( $li_matches[2] ) );
+							$item_content = trim( $this->strip_recognized_tags_only( $li_matches[2] ) );
+							$item_content = $this->escape_stray_chars_for_slack( $item_content );
+							// Collapse any blank-line run inside the item's own content down
+							// to a single newline - e.g. Gutenberg's serialized whitespace
+							// between this item's text and a nested sublist that follows it,
+							// which by this point is already-converted bullet text, not a
+							// literal <ul>/<ol> tag anymore. Unconditional, unlike the
+							// optional cross-block collapse further down the pipeline: this
+							// only ever touches content already confirmed to be inside one
+							// <li>, so it can't affect spacing between top-level blocks.
+							$item_content = preg_replace( '/\n\s*\n+/', "\n", $item_content );
 							// Add indentation to multi-line items
 							$item_content = str_replace( "\n", "\n" . $indent . '  ', $item_content );
 							// Skip bullet for ellipsis items (has excerpt-ellipsis class or list-style-type: none)
@@ -845,18 +1365,36 @@ class Advanced_Excerpt {
 
 					// Remove the ul tags
 					$content = preg_replace( '/<\/?ul[^>]*>/i', '', $content );
+
+					// No extra separation from surrounding text — just the
+					// single newline each bullet already starts with.
 					return $content . "\n";
 				},
-				$text
+				$text,
+				-1,
+				$ul_replace_count,
+				PREG_OFFSET_CAPTURE
 			);
 
 			// Process ordered lists similarly
+			$scan_text = $text;
 			$text = preg_replace_callback(
 				'/<ol[^>]*>(?:(?!<ul|<ol).)*?<\/ol>/is',
-				function( $matches ) use ( $depth, $max_depth ) {
-					$content = $matches[0];
-					$current_depth = min( $depth, $max_depth - 1 );
-					$indent = str_repeat( '  ', $current_depth );
+				function( $matches ) use ( $max_depth, $scan_text ) {
+					$content = $matches[0][0];
+					$offset = $matches[0][1];
+					// Indentation reflects total depth (any list type);
+					// numbering style reflects only <ol>-ancestor depth, so
+					// a <ul> in between doesn't skip this list ahead a style.
+					$indent_depth = min( $this->list_nesting_depth_at( $scan_text, $offset ), $max_depth - 1 );
+					$style_depth = min( $this->list_nesting_depth_at( $scan_text, $offset, 'ol' ), $max_depth - 1 );
+					$indent = str_repeat( '  ', $indent_depth );
+
+					// Gutenberg-authored lists commonly serialize with blank
+					// lines between </li> and the next <li>; collapse that
+					// gap now so it doesn't turn into a blank line between
+					// numbered items below.
+					$content = preg_replace( '/<\/li>\s*<li/i', '</li><li', $content );
 
 					// Extract list items with their attributes
 					preg_match_all( '/<li([^>]*)>(.*?)<\/li>/is', $content, $items, PREG_SET_ORDER );
@@ -865,7 +1403,13 @@ class Advanced_Excerpt {
 
 					foreach ( $items as $item ) {
 						$li_attrs = $item[1];
-						$item_content = trim( strip_tags( $item[2] ) );
+						$item_content = trim( $this->strip_recognized_tags_only( $item[2] ) );
+						$item_content = $this->escape_stray_chars_for_slack( $item_content );
+						// See the matching comment in the <ul> handler above: collapses
+						// any blank-line run left inside this item's own content (e.g.
+						// from a nested sublist), unconditionally and independently of
+						// the optional cross-block collapse.
+						$item_content = preg_replace( '/\n\s*\n+/', "\n", $item_content );
 
 						// Skip marker for ellipsis items (has excerpt-ellipsis class or list-style-type: none)
 						if ( strpos( $li_attrs, 'excerpt-ellipsis' ) !== false || strpos( $li_attrs, 'list-style-type: none' ) !== false ) {
@@ -876,9 +1420,9 @@ class Advanced_Excerpt {
 						}
 
 						// Different numbering styles by depth
-						if ( $current_depth % 3 == 0 ) {
+						if ( $style_depth % 3 == 0 ) {
 							$marker = ( $item_number + 1 ) . '.';
-						} elseif ( $current_depth % 3 == 1 ) {
+						} elseif ( $style_depth % 3 == 1 ) {
 							$marker = chr( 97 + ( $item_number % 26 ) ) . ')';
 						} else {
 							$roman = array( 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x' );
@@ -891,9 +1435,14 @@ class Advanced_Excerpt {
 						$item_number++;
 					}
 
+					// No extra separation from surrounding text — just the
+					// single newline each item already starts with.
 					return $result . "\n";
 				},
-				$text
+				$text,
+				-1,
+				$ol_replace_count,
+				PREG_OFFSET_CAPTURE
 			);
 
 			// If nothing changed, break to prevent infinite loop
@@ -919,13 +1468,16 @@ class Advanced_Excerpt {
 	 */
 	function convert_other_tags_for_slack( $text ) {
 		// Convert definition lists (DL/DT/DD) to readable format
-		// <dl><dt>Term</dt><dd>Definition</dd></dl> → "**Term:** Definition"
+		// <dl><dt>Term</dt><dd>Definition</dd></dl> → "*Term:* Definition"
+		// Single asterisks: Slack's own mrkdwn bold syntax is *text*, not
+		// GitHub-flavored Markdown's **text** - the latter would show up
+		// as literal, visible asterisk characters instead of bold text.
 		$text = preg_replace_callback(
 			'/<dl[^>]*>(.*?)<\/dl>/is',
 			function( $matches ) {
 				$content = $matches[1];
 				// Convert DT/DD pairs
-				$content = preg_replace( '/<dt[^>]*>(.*?)<\/dt>\s*<dd[^>]*>(.*?)<\/dd>/is', "\n**$1:** $2", $content );
+				$content = preg_replace( '/<dt[^>]*>(.*?)<\/dt>\s*<dd[^>]*>(.*?)<\/dd>/is', "\n*$1:* $2", $content );
 				// Clean up remaining tags
 				$content = preg_replace( '/<\/?d[tld][^>]*>/i', '', $content );
 				return $content;
@@ -940,7 +1492,8 @@ class Advanced_Excerpt {
 			function( $matches ) {
 				$content = trim( $matches[1] );
 				// Strip inner HTML tags for cleaner quotes
-				$content = strip_tags( $content );
+				$content = $this->strip_recognized_tags_only( $content );
+				$content = $this->escape_stray_chars_for_slack( $content );
 				// Add > prefix to each line
 				$lines = explode( "\n", $content );
 				$quoted = array();
@@ -966,8 +1519,12 @@ class Advanced_Excerpt {
 
 	/**
 	 * Enforce RSS maximum character length
-	 * Truncates content if it exceeds the limit, ensuring tags remain valid
-	 * Slack recommended limit: 4000 chars, absolute max: 40000 chars
+	 * Truncates content if it exceeds the limit, ensuring tags remain valid.
+	 * Absolute max: 40000 chars. For Slack: its own RSS app has been observed
+	 * truncating messages mid-tag independently of feed length (confirmed
+	 * even well under 1000 chars, on sites unrelated to this plugin), so a
+	 * low setting here (e.g. 300-500) reduces but can't guarantee avoiding
+	 * that separate, undocumented Slack-side truncation.
 	 *
 	 * @param string $text Excerpt text with HTML
 	 * @param int $max_length Maximum character length
@@ -1006,23 +1563,17 @@ class Advanced_Excerpt {
 
 		// Build tag stack to find unclosed tags
 		$tag_stack = array();
-		$self_closing = array( 'br', 'hr', 'img', 'input', 'meta', 'link' );
 
 		// Find all tags in order
 		preg_match_all( '/<(\/?[a-zA-Z0-9]+)(?:\s[^>]*)?(\/)?>/i', $truncated, $all_tags, PREG_PATTERN_ORDER );
 
 		foreach ( $all_tags[1] as $index => $tag_name ) {
 			$is_closing = ( strpos( $tag_name, '/' ) === 0 );
-			$is_self_closing = ( ! empty( $all_tags[2][$index] ) || in_array( strtolower( $tag_name ), $self_closing ) );
+			$is_self_closing = ( ! empty( $all_tags[2][$index] ) || in_array( strtolower( $tag_name ), $this->void_elements ) );
 
 			if ( $is_closing ) {
-				$clean_tag = substr( $tag_name, 1 );
-				// Remove from stack
-				$key = array_search( $clean_tag, array_reverse( $tag_stack, true ) );
-				if ( $key !== false ) {
-					unset( $tag_stack[count($tag_stack) - 1 - $key] );
-					$tag_stack = array_values( $tag_stack );
-				}
+				$clean_tag = strtolower( substr( $tag_name, 1 ) );
+				$this->remove_from_tag_stack( $tag_stack, $clean_tag );
 			} elseif ( ! $is_self_closing ) {
 				$tag_stack[] = strtolower( $tag_name );
 			}
@@ -1044,7 +1595,10 @@ class Advanced_Excerpt {
 		return $truncated;
 	}
 
-	public function text_add_more( $text, $ellipsis, $read_more, $link_new_tab, $link_screen_reader ) {
+	public function text_add_more( $text, $ellipsis, $read_more, $link_new_tab, $link_screen_reader ) {		
+		
+		$ellipsis = esc_html( $ellipsis );
+		$read_more = wp_kses_data( $read_more );
 
 		if ( $read_more ) {
 
@@ -1096,22 +1650,22 @@ class Advanced_Excerpt {
 
 	function update_options() {
 		$_POST = stripslashes_deep( $_POST );
-		$this->options['length'] = (int) $_POST['length'];
+		$this->options['length'] = isset( $_POST['length'] ) ? (int) $_POST['length'] : $this->options['length'];
 
-		$checkbox_options = array( 'no_custom', 'no_custom_from_custom', 'no_shortcode', 'add_link', 'link_new_tab', 'link_screen_reader', 'link_exclude_length', 'link_on_custom_excerpt', 'the_excerpt', 'the_content', 'the_content_no_break', 'link_excerpt', 'enable_homepage_category_filter', 'skip_headers' );
+		$checkbox_options = array( 'no_custom', 'no_custom_from_custom', 'no_shortcode', 'add_link', 'link_new_tab', 'link_screen_reader', 'link_exclude_length', 'link_on_custom_excerpt', 'the_excerpt', 'the_content', 'the_content_no_break', 'link_excerpt', 'enable_homepage_category_filter', 'skip_headers', 'strip_links_slack', 'strip_empty_lines_slack' );
 
 		foreach ( $checkbox_options as $checkbox_option ) {
 			$this->options[$checkbox_option] = ( isset( $_POST[$checkbox_option] ) ) ? 1 : 0;
 		}
 
-		$this->options['length_type'] = $_POST['length_type'];
-		$this->options['finish'] = $_POST['finish'];
-		$this->options['ellipsis'] = $_POST['ellipsis'];
-		$this->options['list_ellipsis'] = isset( $_POST['list_ellipsis'] ) ? $_POST['list_ellipsis'] : '';
-		$this->options['read_more'] = isset( $_POST['read_more'] ) ? $_POST['read_more'] : $this->options['read_more'];
-		$this->options['allowed_tags'] = ( isset( $_POST['allowed_tags'] ) ) ? array_unique( (array) $_POST['allowed_tags'] ) : array();
-		$this->options['exclude_pages'] = ( isset( $_POST['exclude_pages'] ) ) ? array_unique( (array) $_POST['exclude_pages'] ) : array();
-		$this->options['allowed_tags_option'] = $_POST['allowed_tags_option'];
+		$this->options['length_type'] = isset( $_POST['length_type'] ) ? sanitize_text_field( $_POST['length_type'] ) : $this->options['length_type'];
+		$this->options['finish'] = isset( $_POST['finish'] ) ? sanitize_text_field( $_POST['finish'] ) : $this->options['finish'];
+		$this->options['ellipsis'] = isset( $_POST['ellipsis'] ) ? sanitize_text_field( $_POST['ellipsis'] ) : $this->options['ellipsis'];
+		$this->options['list_ellipsis'] = isset( $_POST['list_ellipsis'] ) ? sanitize_text_field( $_POST['list_ellipsis'] ) : '';
+		$this->options['read_more'] = isset( $_POST['read_more'] ) ? sanitize_text_field( $_POST['read_more'] ) : $this->options['read_more'];
+		$this->options['allowed_tags'] = ( isset( $_POST['allowed_tags'] ) ) ? array_unique( array_map( 'sanitize_text_field', (array) $_POST['allowed_tags'] ) ) : array();
+		$this->options['exclude_pages'] = ( isset( $_POST['exclude_pages'] ) ) ? array_unique( array_map( 'sanitize_text_field', (array) $_POST['exclude_pages'] ) ) : array();
+		$this->options['allowed_tags_option'] = isset( $_POST['allowed_tags_option'] ) ? sanitize_text_field( $_POST['allowed_tags_option'] ) : $this->options['allowed_tags_option'];
 		$this->options['homepage_categories'] = ( isset( $_POST['homepage_categories'] ) ) ? array_map( 'intval', array_unique( (array) $_POST['homepage_categories'] ) ) : array();
 		$this->options['max_list_items'] = isset( $_POST['max_list_items'] ) ? (int) $_POST['max_list_items'] : 0;
 		$this->options['max_top_level_list_items'] = isset( $_POST['max_top_level_list_items'] ) ? (int) $_POST['max_top_level_list_items'] : 0;
@@ -1121,7 +1675,7 @@ class Advanced_Excerpt {
 		update_option( 'advanced_excerpt', $this->options );
 
 		wp_redirect( admin_url( $this->plugin_base ) . '&settings-updated=1' );
-		exit;
+		exit;		
 	}
 
 	function page_options() {
@@ -1166,8 +1720,28 @@ class Advanced_Excerpt {
 	}
 
 	function filter_homepage_category( $query ) {
-		// Only modify the main query on the front-end homepage
-		if ( is_admin() || ! $query->is_main_query() || ! $query->is_home() ) {
+		// Only modify the main query for either the front-end homepage
+		// itself (is_home()), or the site's own default feed (e.g.
+		// /feed/, /feed/atom/, etc.) - the RSS/Atom equivalent of that
+		// same "homepage" set of posts.
+		//
+		// WordPress core's is_home() is unconditionally false whenever
+		// is_feed() is true (is_feed is one of the exclusions in
+		// WP_Query::parse_query()'s own is_home logic), so the default
+		// feed needs an equivalent check built the same way core builds
+		// is_home - just without excluding on is_feed. Deliberately
+		// excludes any OTHER kind of feed - category, tag, author, date,
+		// custom taxonomy/post type archive (all covered by is_archive()),
+		// search, or a single post's own comment feed (is_singular()) -
+		// since none of those are "the homepage" and must not be limited
+		// by this filter.
+		if ( is_admin() || ! $query->is_main_query() ) {
+			return;
+		}
+
+		$is_default_feed = $query->is_feed() && ! $query->is_singular() && ! $query->is_archive() && ! $query->is_search();
+
+		if ( ! $query->is_home() && ! $is_default_feed ) {
 			return;
 		}
 

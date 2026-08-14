@@ -18,7 +18,7 @@
 							</label>
 						</th>
 						<td>
-							<input name="length" type="text" id="length" value="<?php echo $length; ?>" size="2" />
+							<input name="length" type="text" id="length" value="<?php echo esc_attr( $length ); ?>" size="2" />
 							<select name="length_type">
 								<option value="characters"<?php echo ( 'characters' == $length_type ) ? ' selected="selected"' : ''; ?>><?php _e( "Characters", 'advanced-excerpt' ); ?></option>
 								<option value="words"<?php echo ( 'words' == $length_type ) ? ' selected="selected"' : ''; ?>><?php _e( "Words", 'advanced-excerpt' ); ?></option>
@@ -33,7 +33,7 @@
 						</th>
 						<td>
 							<p>
-								<input name="ellipsis" type="text" id="ellipsis" value="<?php echo $ellipsis; ?>" size="5" />
+								<input name="ellipsis" type="text" id="ellipsis" value="<?php echo esc_attr( $ellipsis ); ?>" size="5" />
 								<?php printf( __( '(use <a href="%s" target="_blank">HTML entities</a>)', 'advanced-excerpt' ), 'http://entitycode.com' ); ?>
 							</p>
 							<p class="description"><?php _e( "Will substitute the part of the post that is omitted in the excerpt.", 'advanced-excerpt' ); ?></p>
@@ -47,7 +47,7 @@
 						</th>
 						<td>
 							<p>
-								<input name="list_ellipsis" type="text" id="list-ellipsis" value="<?php echo isset( $list_ellipsis ) ? htmlentities( $list_ellipsis ) : ''; ?>" size="20" />
+								<input name="list_ellipsis" type="text" id="list-ellipsis" value="<?php echo isset( $list_ellipsis ) ? esc_attr( $list_ellipsis ) : ''; ?>" size="20" />
 								<?php printf( __( '(use <a href="%s" target="_blank">HTML entities</a>)', 'advanced-excerpt' ), 'http://entitycode.com' ); ?>
 							</p>
 							<p class="description"><?php _e( "Displayed when a list or table is truncated due to item/row limits. For lists: shows as a list item without a bullet point. For tables: shows as plain text below the table. Leave empty to disable.", 'advanced-excerpt' ); ?></p>
@@ -104,7 +104,7 @@
 							</label>
 						</th>
 						<td>
-							<input name="max_list_items" type="number" id="max-list-items" value="<?php echo $max_list_items; ?>" min="0" size="3" />
+							<input name="max_list_items" type="number" id="max-list-items" value="<?php echo esc_attr( $max_list_items ); ?>" min="0" size="3" />
 							<p class="description"><?php _e( "Maximum total number of list items (LI) to include across all nesting levels. Set to 0 for unlimited. This counts ALL items including nested sub-items.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
@@ -115,7 +115,7 @@
 							</label>
 						</th>
 						<td>
-							<input name="max_top_level_list_items" type="number" id="max-top-level-list-items" value="<?php echo $max_top_level_list_items; ?>" min="0" size="3" />
+							<input name="max_top_level_list_items" type="number" id="max-top-level-list-items" value="<?php echo esc_attr( $max_top_level_list_items ); ?>" min="0" size="3" />
 							<p class="description"><?php _e( "Maximum number of top-level list items (excludes nested sub-items) and table rows. Set to 0 for unlimited. Use this to limit list/table size without counting nested items.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
@@ -126,7 +126,7 @@
 							</label>
 						</th>
 						<td>
-							<input name="max_top_level_structures" type="number" id="max-top-level-structures" value="<?php echo $max_top_level_structures; ?>" min="0" size="3" />
+							<input name="max_top_level_structures" type="number" id="max-top-level-structures" value="<?php echo esc_attr( $max_top_level_structures ); ?>" min="0" size="3" />
 							<p class="description"><?php _e( "Maximum number of top-level tables and lists (UL/OL) to include in the excerpt. Set to 0 for unlimited. Nested lists count as one structure. All structures are properly closed.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
@@ -137,8 +137,36 @@
 							</label>
 						</th>
 						<td>
-							<input name="rss_max_length" type="number" id="rss-max-length" value="<?php echo isset( $rss_max_length ) ? $rss_max_length : 0; ?>" min="0" size="5" />
-							<p class="description"><?php _e( "Maximum character length for RSS feeds (recommended: 4000 for Slack, max: 40000). Set to 0 for no limit. When enabled, ensures RSS excerpts stay within this limit with valid HTML. Helps prevent broken HTML in Slack and other RSS readers with length restrictions.", 'advanced-excerpt' ); ?></p>
+							<input name="rss_max_length" type="number" id="rss-max-length" value="<?php echo isset( $rss_max_length ) ? esc_attr( $rss_max_length ) : 0; ?>" min="0" size="5" />
+							<p class="description"><?php _e( "Maximum character length for RSS feeds (max: 40000). Set to 0 for no limit. Ensures RSS excerpts stay within this limit with valid, properly-closed HTML.", 'advanced-excerpt' ); ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row">
+							<label for="strip-links-slack">
+							<?php _e( "Strip Links from Slack Feeds:", 'advanced-excerpt' ); ?>
+							</label>
+						</th>
+						<td>
+							<label for="strip-links-slack">
+							<input name="strip_links_slack" type="checkbox" id="strip-links-slack" value="on" <?php echo ( 1 == $strip_links_slack ) ? 'checked="checked"' : ''; ?> />
+							<?php _e( "Remove every link in the Slack-formatted output, keeping only its visible text.", 'advanced-excerpt' ); ?>
+							</label>
+							<p class="description"><?php _e( "Applies even if &lt;a&gt; tag is otherwise allowed by the Strip Tags setting below, when the RSS request's User-Agent identifies Slack's own RSS app. Also inserts an invisible character into any URL-shaped plain text strings within the feed, in order to prevent Slack from auto-linking them - the text still reads and copies normally.", 'advanced-excerpt' ); ?></p>
+						</td>
+					</tr>
+					<tr valign="top">
+						<th scope="row">
+							<label for="strip-empty-lines-slack">
+							<?php _e( "Strip Empty Lines from Slack Feeds:", 'advanced-excerpt' ); ?>
+							</label>
+						</th>
+						<td>
+							<label for="strip-empty-lines-slack">
+							<input name="strip_empty_lines_slack" type="checkbox" id="strip-empty-lines-slack" value="on" <?php echo ( 1 == $strip_empty_lines_slack ) ? 'checked="checked"' : ''; ?> />
+							<?php _e( "Collapse blank lines between blocks (paragraphs, headings, lists, blockquotes, etc.) in the Slack-formatted output.", 'advanced-excerpt' ); ?>
+							</label>
+							<p class="description"><?php _e( "Only affects the Slack-specific plain-text conversion, applied automatically when the RSS request's User-Agent identifies Slack's own RSS app. Spacing within a list itself (between items, and around a nested sublist) is always kept collapsed regardless of this setting.", 'advanced-excerpt' ); ?></p>
 						</td>
 					</tr>
 					<tr valign="top">
@@ -152,7 +180,7 @@
 							<?php _e( "Add read more link to excerpt", 'advanced-excerpt' ); ?>
 							</label><br />
 
-							<input name="read_more" type="text" id="read-more" value="<?php echo $read_more; ?>" <?php echo ( 1 !== $add_link ) ? 'disabled="disabled"' : ''; ?> /><br>
+							<input name="read_more" type="text" id="read-more" value="<?php echo esc_attr( $read_more ); ?>" <?php echo ( 1 !== $add_link ) ? 'disabled="disabled"' : ''; ?> /><br>
 							
 							<ul class="sub-options">
 								<li>
@@ -269,7 +297,7 @@
 						</th>
 						<td>
 							<p>
-								<?php foreach ( $exclude_pages_list as $key => $label ) :
+								<?php foreach ( $exclude_pages_list as $key => $label ) : 
 									$key_dashed = str_replace( '_', '-', $key ); ?>
 									<label for="<?php echo $key_dashed; ?>">
 									<input name="exclude_pages[]" type="checkbox" id="<?php echo $key_dashed; ?>" value="<?php echo $key; ?>" <?php echo ( in_array( $key, $exclude_pages ) ) ? 'checked="checked"' : ''; ?> />
@@ -311,9 +339,9 @@
 										$post_count = $category->count;
 										$is_checked = ( in_array( $category_id, $homepage_categories ) ) ? 'checked="checked"' : '';
 										?>
-										<label for="homepage-cat-<?php echo $category_id; ?>" style="display: block; margin-bottom: 5px;">
-											<input name="homepage_categories[]" type="checkbox" id="homepage-cat-<?php echo $category_id; ?>" value="<?php echo $category_id; ?>" <?php echo $is_checked; ?> />
-											<?php echo $category_name; ?> (<?php echo $post_count; ?>)
+										<label for="homepage-cat-<?php echo esc_attr( $category_id ); ?>" style="display: block; margin-bottom: 5px;">
+											<input name="homepage_categories[]" type="checkbox" id="homepage-cat-<?php echo esc_attr( $category_id ); ?>" value="<?php echo esc_attr( $category_id ); ?>" <?php echo $is_checked; ?> />
+											<?php echo $category_name; ?> (<?php echo esc_html( $post_count ); ?>)
 										</label>
 										<?php
 									endforeach;
@@ -324,6 +352,9 @@
 							</div>
 							<p class="description">
 								<?php _e( 'When enabled, your homepage will only display posts from the selected categories. Make sure "Your homepage displays" is set to "Your latest posts" in Settings → Reading.', 'advanced-excerpt' ); ?>
+							</p>
+							<p class="description">
+								<?php _e( "Also applies to the site's own default RSS/Atom feed (e.g. /feed/), since it shows the same set of posts as the homepage. Does not affect a category, tag, author, date, or search results feed, or a single post's own comment feed.", 'advanced-excerpt' ); ?>
 							</p>
 						</td>
 					</tr>

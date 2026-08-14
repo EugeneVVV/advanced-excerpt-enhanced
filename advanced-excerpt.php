@@ -3,13 +3,13 @@
 Plugin Name: Advanced Excerpt (Enhanced Fork)
 Plugin URI: http://wordpress.org/plugins/advanced-excerpt/
 Description: Control the appearance of WordPress post excerpts - Enhanced with category filtering, smart tag closing, list/table limits, and excerpt cut markers
-Version: 4.4.2-fork
+Version: 4.5.1-fork
 Author: WPKube (Enhanced by Community)
 Author URI: https://wpkube.com
 Text Domain: advanced-excerpt
 */
 
-$GLOBALS['advanced_excerpt_version'] = '4.4.2-fork';
+$GLOBALS['advanced_excerpt_version'] = '4.5.1-fork';
 
 function advanced_excerpt_load_textdomain() {
 	load_plugin_textdomain( 'advanced-excerpt', false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' );

@@ -2,73 +2,81 @@
 
 A significantly enhanced version of the Advanced Excerpt WordPress plugin with improved HTML handling, RSS compatibility, and powerful new features.
 
+> Looking for installation steps, FAQ, or the full version history? See [readme.txt](readme.txt).
+
 ## 🎯 New Features
 
 ### 1. **Homepage Category Filter**
-- Filter homepage posts by multiple categories
+- **Filter homepage posts by multiple categories**
 - Dynamic category selection with checkboxes
 - Fully compatible with pagination
 - OR logic: displays posts from ANY selected category
+- Also applies to the site's own default RSS/Atom feed (e.g. `/feed/`)
 
-### 2. **Smart Tag Closing & RSS Safety**
+### 2. **Block Finish Mode**
+- **Stop excerpt at the next block-level element after length reached**
+- Supports 37 block-level tags: `br`, `p`, `div`, `blockquote`, `li`, `td`, `th`, `h1-h6`, `article`, `section`, `header`, `footer`, `aside`, `nav`, `ul`, `ol`, `table`, `tr`, `pre`, `form`, `fieldset`, `dl`, `dt`, `dd`, `hr`, `figure`, `figcaption`, `main`, `address`, `details`, `summary`, `dialog`
+- Also stops as soon as the current inline element closes (`a`, `strong`, `b`, `em`, `i`, `span`, `code`, `mark`, `small`, `sub`, `sup`, `u`, `s`, `abbr`, `cite`, `q`) so a long stretch of inline content (e.g. several links in a row) can't drag the excerpt on indefinitely while waiting for a distant block boundary
+- Default finish mode for new installations
+- Creates natural-looking excerpt boundaries
+
+### 3. **Smart Tag Closing**
 - **No more broken HTML in excerpts!**
-- Automatically tracks and closes all unclosed tags
-- Maintains proper nesting structure
-- **RSS-safe output** - perfect for feed readers
-- Removes broken/partial tags at excerpt end (fixes Slack & other readers)
-- RSS-specific line break cleanup (removes ALL `<br>` tags in feeds)
+- Automatically tracks and closes all unclosed tags and maintains proper nesting structure
+- Strips any trailing malformed tag fragment (e.g. a missing closing `>`) left over from the source content, so excerpts never end mid-tag
+- Recognizes HTML5 void elements (`<hr>`, `<br>`, `<img>`, etc.) even without a trailing slash, so they're never mistaken for a tag needing a closing counterpart
+- Plain text shaped like a tag (e.g. `<Free>`, `<New>`) is never mistaken for real markup
+- Removes unnecessary consecutive `<br>` tags for better readability (when not stripped per settings)
+- Only `<a>` tags with a real, followable `href` are kept (when anchors are not stripped per settings), while the following are unwrapped to their visible text instead:
+  - Empty `href=""`
+  - Same-page fragments (`href="#"`, `href="#section2"`) — meaningless once the content is lifted out of the full page into an excerpt
+  - Bare anchors with no `href` at all (e.g. `<a name="section">`, an in-page jump target rather than a link)
+  - `javascript:`/`data:`/`vbscript:` pseudo-schemes — not a real destination outside a browser executing script
+
+### 4. **Header Content Skipping**
+- Option to skip H1-H6 text content (not just the tags)
+- Header text not counted toward excerpt length
+
+### 5. **RSS-Safe Output**
+- **RSS Max Length**: optional character cap on RSS feed excerpts, truncated safely so HTML always stays valid and properly closed
+- **Slack-specific formatting** — detected automatically from the RSS request's User-Agent, no setting to toggle; other feed readers get standard HTML, unaffected by the following:
+  - **Links use a minimal `<a href="URL">Text</a>` tag**, stripped down to nothing but `href` — no `target`/`rel`/`data-*` attributes, which is what let complex links leak through as raw, unparsed visible text in the first place. A literal `|` occurring naturally within link text is also replaced with a forward slash (`/`), since Slack's RSS app converts incoming HTML to its own mrkdwn internally before rendering and that conversion uses `|` as its own link delimiter
+  - **Strip Links from Slack Feeds** (on by default): removes every link, leaving visible text only, even if `<a>` is otherwise allowed by Strip Tags. Also disrupts any URL-shaped plain text with an invisible Word Joiner character to stop Slack from auto-linking it — the text still reads and copies normally.
+  - **Strip Empty Lines from Slack Feeds** (on by default): optionally collapses blank lines *between* top-level blocks (paragraphs, headings, blockquotes, `<hr>`, lists) down to a single newline
+  - **Additional tag conversions** for better compatibility
+    - `<blockquote>` → markdown-style quoted text (> prefix)
+    - `<dl>/<dt>/<dd>` → *Term:* Definition format
+    - `<hr>` → text separator (───)
+    - `<br>` → a real line break
+    - Stray `<` and `>` occurring naturally in plain text are escaped (without double-encoding any entity already present)
+
+### 6. **Advanced List Handling**
+- Set maximum list items across all lists
+- Tracks nested list depth (UL/OL) and properly closes all list levels, preventing mid-list cutoffs
 - **Slack-optimized list formatting** - converts HTML lists to formatted text
+  - Browser-style formatting for familiar appearance
   - `<ul>` → alternating bullet styles by depth (• ◦ ▪ ▫)
   - `<ol>` → alternating numbering styles (1. a) i))
   - Proper indentation for nested lists (2 spaces per level)
   - Multi-line list items properly indented
-  - Browser-style formatting for familiar appearance
-  - Uses size-consistent Unicode bullets (U+2022, U+25E6, U+25AA, U+25AB)
-  - Works around Slack's limited HTML support
-- **Additional tag conversions** for better compatibility
-  - `<blockquote>` → markdown-style quoted text (> prefix)
-  - `<dl>/<dt>/<dd>` → **Term:** Definition format
-  - `<hr>` → text separator (───)
+  - Unnecessary blank lines removed between sibling list items and around a nested sublist
 
-### 3. **Advanced List Handling**
-- Track nested list depth (UL/OL)
-- Set maximum list items across all lists
-- Properly closes all list levels
-- Prevents mid-list cutoffs
-
-### 4. **Table Management**
+### 7. **Table Management**
 - Smart table row tracking
 - Proper closing of `<table>`, `<tr>`, `<td>`, `<th>`, `<tbody>`, `<thead>`, `<tfoot>`
 - Clean table structure in excerpts
 
-### 5. **Header Content Skipping**
-- Option to skip H1-H6 text content (not just the tags)
-- Header text not counted toward excerpt length
-
-### 6. **Structure Limiting**
+### 8. **Top Level Structure Limiting**
 - Limit maximum top-level tables and lists
 - Nested lists count as one structure
 - All structures properly closed when limit reached
 
-### 7. **List/Table Ellipsis**
+### 9. **List/Table Ellipsis**
 - Separate ellipsis marker for truncated lists and tables
 - For lists: displayed as a list item without bullet
 - For tables: displayed as plain text below the table
 - Customizable or can be disabled (leave empty)
 - Works with item/row limits
-
-### 8. **Block Finish Mode**
-- Stop excerpt at next block-level element after length reached
-- Supports 37 block-level tags: `br`, `p`, `div`, `blockquote`, `li`, `td`, `th`, `h1-h6`, `article`, `section`, `header`, `footer`, `aside`, `nav`, `ul`, `ol`, `table`, `tr`, `pre`, `form`, `fieldset`, `dl`, `dt`, `dd`, `hr`, `figure`, `figcaption`, `main`, `address`, `details`, `summary`, `dialog`
-- Default finish mode for new installations
-- Creates natural-looking excerpt boundaries
-
-### 9. **Line Break Cleanup**
-- Removes multiple consecutive `<br>` tags (max 1 in regular excerpts)
-- **RSS feeds**: Removes ALL `<br>` tags for better readability
-- Eliminates `<br>` between block elements
-- Clean, professional formatting
-- No awkward spacing issues in feeds or excerpts
 
 ### 10. **Excerpt Cut & Excerpt Only Shortcodes**
 - **[excerpt_cut]**: Hide content from excerpts, show in full posts
@@ -83,50 +91,17 @@ A significantly enhanced version of the Advanced Excerpt WordPress plugin with i
 - Nested shortcodes automatically ignored
 - Unpaired `[excerpt_cut]` cuts to end of post
 
-## 📊 Key Improvements
-
-| Feature | Before | After |
-|---------|--------|-------|
-| Tag Closing | ❌ Often broken | ✅ Always valid |
-| RSS Compatibility | ❌ Poor, broken tags | ✅ Excellent, safe HTML |
-| RSS Line Breaks | ❌ Multiple `<br>` | ✅ All `<br>` removed |
-| Broken Tag Cleanup | ❌ Mid-tag cutoffs | ✅ Always clean tags |
-| List Handling | ❌ Basic | ✅ Advanced with depth tracking |
-| Table Support | ❌ Breaks mid-row | ✅ Clean row completion |
-| Line Breaks | ❌ Multiple/messy | ✅ Clean & minimal |
-| Homepage Filtering | ❌ None | ✅ Multi-category support |
-| Content Exclusion | ❌ None | ✅ Shortcode markers |
-| Finish Modes | ❌ Exact/Word/Sentence | ✅ + Block mode (37 tags) |
-| List/Table Ellipsis | ❌ Generic only | ✅ Separate customizable |
-
-## 🚀 Installation
-
-1. Download the plugin
-2. Upload to `/wp-content/plugins/advanced-excerpt/`
-3. Activate through WordPress admin
-4. Configure via Settings → Excerpt
-
 ## ⚙️ Configuration Options
 
-### Basic Settings
-- **Excerpt Length**: Words or characters
-- **Text Ellipsis**: Custom text for truncation (e.g., `&hellip;`)
-- **List/Table Ellipsis** (new!): Separate ellipsis for truncated lists/tables
-- **Finish**: Exact, Word, Sentence, or **Block** (new!) completion
-  - **Block mode**: Stops at next block-level tag or `<br>` after length reached
-  - Supports 37 block-level tags including HTML5 elements
-- **Read More Link**: Customizable link text
-
 ### New Advanced Settings
+- **Finish**: now also offers **Block** mode alongside the original Exact/Word/Sentence options — see Block Finish Mode above
 - **Skip Headers**: Remove H1-H6 content from excerpts
 - **Max List Items (Total)**: Limit total list items across all nesting levels (0 = unlimited)
 - **Max Top-Level List Items**: Limit only top-level list items, excludes nested items (0 = unlimited)
 - **Max Top-Level Structures**: Limit tables/lists (0 = unlimited)
-- **RSS Max Length (chars)**: Maximum character limit for RSS feeds
-  - **Recommended for Slack**: 4000 characters
-  - **Slack absolute max**: 40000 characters (truncated after)
-  - Ensures valid HTML even after truncation
-  - Set to 0 for no limit
+- **RSS Max Length (chars)**: Maximum character limit for RSS feeds (0 = unlimited) - ensures valid, properly-closed HTML even after truncation 
+- **Strip Links from Slack Feeds** (on by default): removes every link from Slack's output — see RSS-Safe Output above
+- **Strip Empty Lines from Slack Feeds** (on by default): collapses blank lines between top-level blocks in Slack's plain-text conversion — see RSS-Safe Output above
 - **Homepage Category Filter**: Multi-select category filtering
 
 ## 💡 Usage Examples
@@ -218,49 +193,6 @@ Control what appears in excerpts vs full posts:
 - Nested shortcodes automatically ignored
 - Unpaired `[excerpt_cut]` cuts to end of post
 - Works with all other excerpt features
-
-## 📝 Changelog
-
-### Version 4.4.2-fork
-**Bug Fixes:**
-- Fix OOM on archive/search pages: replaced `apply_filters('the_content')` with safe core formatting functions (`wptexturize`, `wpautop`, `shortcode_unautop`) to prevent plugin hooks (do_shortcode, WP_Term_Query, etc.) exhausting memory when generating excerpts for many posts at once
-- `[excerpt_cut]`, `[excerpt_only]`, and `[advanced_excerpt_text]` shortcodes continue to work correctly; all third-party shortcodes are stripped without executing
-
-**New Shortcodes:**
-- `[excerpt_cut]` with optional `text` parameter for replacement content in excerpts
-- `[excerpt_only]` with optional `text` parameter for replacement content in full posts
-- Smart nested shortcode handling (automatically ignored)
-- Multiple use cases: hide details, show teasers, swap content between excerpt/post
-
-**RSS Feed Improvements:**
-- Removes ALL `<br>` tags in RSS feeds (not just duplicates)
-- Cleans up broken/partial HTML tags at excerpt end
-- **Slack-friendly list conversion** - HTML lists → formatted text
-  - Converts `<ul>/<li>` to bullet points (•) with line breaks
-  - Converts `<ol>/<li>` to numbered lists (1., 2., 3.)
-  - Handles nested lists with indentation (basic support)
-  - Workaround for Slack's limited HTML tag support
-  - Prevents lists from appearing as wall of text with extra line breaks
-- **RSS Max Length setting** enforces character limits (recommended: 4000 for Slack)
-  - Slack recommended limit: 4000 characters for optimal display
-  - Slack absolute max: 40000 characters (messages truncated after)
-  - Intelligently truncates at safe points (after closing tags)
-  - Automatically closes all unclosed tags after truncation
-- Fixes display issues in Slack and other RSS readers with length limits
-- Prevents mid-tag cutoffs that show raw HTML
-
-**Other Features:**
-- Homepage category filter with multi-select
-- Smart tag closing for RSS-safe excerpts
-- Advanced list/table handling with limits
-- List/Table ellipsis markers
-- Block finish mode with 37 block-level tags
-- Header content skipping
-- Enhanced line break cleanup (feed-aware)
-- Version upgrade detection for existing installations
-
-### Original Version 4.4.1
-- See readme.txt for original changelog
 
 ## 📄 License
 

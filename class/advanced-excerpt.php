@@ -1634,8 +1634,35 @@ class Advanced_Excerpt {
 			$allow_tags_to_append_into = apply_filters( 'advanced_excerpt_allow_tags_to_append_into', array( 'p', 'article', 'section' ) );
 
 			if( !in_array( $last_tag, $allow_tags_to_append_into ) ) {
-				// After the content
-				$text .= $ellipsis;
+				/*
+				 * The excerpt ends with a closing tag we can't append into
+				 * (anything other than p/article/section). If that tag is
+				 * block-level, a bare inline ellipsis/read-more link would
+				 * land directly in the post container outside any paragraph:
+				 * it loses the theme's paragraph styling and drops to a new
+				 * line at the left margin (e.g. after </blockquote>, </ul>,
+				 * </table>, </h2>). Wrapping it in a <p> makes it render
+				 * identically to the appended-inside-</p> case. Excerpts that
+				 * end with an inline tag (</strong>, </a>, ...) are still
+				 * inside a block, so they keep the bare append.
+				 */
+				$block_level_tags = apply_filters(
+					'advanced_excerpt_block_level_tags',
+					array( 'blockquote', 'div', 'ul', 'ol', 'li', 'table',
+					       'dl', 'dd', 'dt', 'h1', 'h2', 'h3', 'h4', 'h5',
+					       'h6', 'pre', 'figure', 'figcaption', 'aside',
+					       'header', 'footer', 'main', 'details', 'dialog',
+					       'address', 'fieldset', 'form', 'nav', 'section' )
+				);
+
+				if ( in_array( $last_tag, $block_level_tags ) ) {
+					// trim(): the link template starts with a space that
+					// would show up as paragraph padding.
+					$text .= '<p class="excerpt-read-more">' . trim( $ellipsis ) . '</p>';
+				} else {
+					// After the content
+					$text .= $ellipsis;
+				}
 				return $text;
 			}
 			// Inside last HTML tag
